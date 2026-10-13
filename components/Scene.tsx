@@ -13,7 +13,8 @@ function GlowSphere({
   size = 0.075,
   selected = false,
   targetPosition,
-  startedAt
+  startedAt,
+  wireframe = false
 }: {
   color: string;
   position: [number, number, number];
@@ -21,6 +22,7 @@ function GlowSphere({
   selected?: boolean;
   targetPosition?: [number, number, number];
   startedAt?: number;
+  wireframe?: boolean;
 }) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
@@ -36,11 +38,17 @@ function GlowSphere({
   return (
     <mesh ref={ref} position={position}>
       <icosahedronGeometry args={[size, 1]} />
-      <meshBasicMaterial color={color} toneMapped={false} />
+      <meshBasicMaterial
+        color={color}
+        toneMapped={false}
+        wireframe={wireframe}
+        transparent={wireframe}
+        opacity={wireframe ? 0.95 : 1}
+      />
       {selected && (
         <mesh scale={1.8}>
           <ringGeometry args={[size * 1.8, size * 2.2, 32]} />
-          <meshBasicMaterial color="#FFBF00" transparent opacity={0.8} side={THREE.DoubleSide} />
+          <meshBasicMaterial color="#FF0033" transparent opacity={0.9} side={THREE.DoubleSide} />
         </mesh>
       )}
     </mesh>
@@ -131,10 +139,11 @@ function OrbitalScene() {
       {debris.map((item) => (
         <GlowSphere
           key={item.id}
-          color={item.status === "Secured" ? "#536566" : "#FF0033"}
+          color={item.id === selectedDebrisId ? "#FF0033" : item.status === "Secured" ? "#536566" : "#FF0033"}
           position={item.position}
-          size={item.status === "Secured" ? 0.055 : 0.08}
+          size={item.status === "Secured" ? 0.038 : 0.052}
           selected={item.id === selectedDebrisId}
+          wireframe
         />
       ))}
       {drones.map((drone) => (
