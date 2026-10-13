@@ -14,7 +14,8 @@ function GlowSphere({
   selected = false,
   targetPosition,
   startedAt,
-  wireframe = false
+  wireframe = false,
+  onClick
 }: {
   color: string;
   position: [number, number, number];
@@ -23,6 +24,7 @@ function GlowSphere({
   targetPosition?: [number, number, number];
   startedAt?: number;
   wireframe?: boolean;
+  onClick?: () => void;
 }) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
@@ -36,7 +38,21 @@ function GlowSphere({
   });
 
   return (
-    <mesh ref={ref} position={position}>
+    <mesh
+      ref={ref}
+      position={position}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        document.body.style.cursor = onClick ? "pointer" : "default";
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = "default";
+      }}
+    >
       <icosahedronGeometry args={[size, 1]} />
       <meshBasicMaterial
         color={color}
@@ -106,7 +122,7 @@ function Trajectory({ drone, target }: { drone: Drone; target: Debris }) {
 
 function OrbitalScene() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const { debris, drones, selectedDebrisId } = useMissionStore();
+  const { debris, drones, selectedDebrisId, selectDebris } = useMissionStore();
 
   useEffect(() => {
     const handleZoom = (event: Event) => {
@@ -144,6 +160,7 @@ function OrbitalScene() {
           size={item.status === "Secured" ? 0.038 : 0.052}
           selected={item.id === selectedDebrisId}
           wireframe
+          onClick={() => selectDebris(item.id)}
         />
       ))}
       {drones.map((drone) => (
@@ -165,6 +182,8 @@ function OrbitalScene() {
       <OrbitControls
         ref={controlsRef}
         enablePan={false}
+        enableZoom={false}
+        enableRotate
         minDistance={4.5}
         maxDistance={9}
         autoRotate
