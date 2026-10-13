@@ -47,10 +47,7 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 .risk-readout strong { grid-row: span 2; color: var(--amber); font: 600 29px/1 "JetBrains Mono", monospace; letter-spacing: -.08em; }
 .risk-bar { grid-column: 1 / 2; width: 150px; height: 3px; background: rgba(255,191,0,.16); }
 .risk-bar span { display: block; height: 100%; background: var(--amber); box-shadow: 0 0 10px rgba(255,191,0,.8); }
-.hud-grid { display: grid; grid-template-columns: minmax(255px, 300px) 1fr minmax(255px, 300px); gap: 22px; padding: 26px 28px 88px; min-height: calc(100vh - 86px); transition: grid-template-columns .35s cubic-bezier(.22,1,.36,1), gap .35s ease; }
-.hud-grid.left-collapsed { grid-template-columns: 44px 1fr minmax(255px, 300px); }
-.hud-grid.right-collapsed { grid-template-columns: minmax(255px, 300px) 1fr 44px; }
-.hud-grid.left-collapsed.right-collapsed { grid-template-columns: 44px 1fr 44px; }
+.hud-grid { display: grid; grid-template-columns: 1fr; padding: 26px 28px 88px; min-height: calc(100vh - 86px); }
 .panel { align-self: stretch; min-height: 0; border: 1px solid rgba(0,255,255,0.16); background: linear-gradient(145deg, rgba(4,22,23,.8), rgba(5,5,5,.3)); backdrop-filter: blur(12px); box-shadow: 0 18px 45px rgba(0,0,0,.25); }
 .manifest-panel, .telemetry-panel { display: flex; flex-direction: column; }
 .panel-heading { display: flex; justify-content: space-between; align-items: start; padding: 17px 16px 14px; border-bottom: 1px solid var(--line); }
