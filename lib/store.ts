@@ -270,13 +270,13 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   logs: [
     {
       id: "init-1",
-      timestamp: getTimeString(),
+      timestamp: "00:00:00",
       message: `SYSTEM INITIALIZED // ${initialDrones.length} DRONES READY`,
       tone: "info"
     },
     {
       id: "init-2",
-      timestamp: getTimeString(),
+      timestamp: "00:00:00",
       message: `DEPOT-01 ANCHORED AT ORBITAL STAGING [0.0, 1.9, 1.8]`,
       tone: "info"
     }

@@ -74,8 +74,13 @@ export default function MissionControl() {
     resetSimulation
   } = useMissionStore();
 
+  const [mounted, setMounted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const logContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const selected = debris.find((item) => item.id === selectedDebrisId) ?? debris[0];
 
@@ -129,6 +134,10 @@ export default function MissionControl() {
 
   const assignedDrone = drones.find((d) => d.targetId === selected?.id);
 
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <main className="mission-shell">
       {/* 3D Visual Layer */}
@@ -151,7 +160,7 @@ export default function MissionControl() {
           </div>
         </div>
 
-        <div className="mission-clock">{timecode}</div>
+        <div className="mission-clock" suppressHydrationWarning>{timecode}</div>
 
         <div className="risk-readout">
           <span className="metric-label">COLLISION RISK MITIGATED</span>
