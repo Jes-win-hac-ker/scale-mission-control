@@ -4,7 +4,7 @@
 @tailwind utilities;
 
 :root {
-  --void: #050505;
+  --void: #010204;
   --beige: #d8ccb8;
   --cyan: #00ffff;
   --amber: #ffbf00;
@@ -19,7 +19,7 @@
 html, body { min-height: 100%; }
 body {
   margin: 0;
-  background: var(--beige);
+  background: var(--void);
   color: #edfafa;
   font-family: "Barlow Condensed", sans-serif;
   overflow-x: hidden;
@@ -28,14 +28,14 @@ body {
 button { font: inherit; }
 button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 
-.mission-shell { position: relative; min-height: 100vh; overflow-x: hidden; background: var(--beige); }
+.mission-shell { position: relative; min-height: 100vh; overflow-x: hidden; background: var(--void); }
 .scene-layer { position: absolute; inset: 0; }
 .scene-canvas, .scene-layer canvas { position: absolute !important; inset: 0; }
 .scene-canvas { touch-action: none; cursor: grab; }
 .scene-canvas:active { cursor: grabbing; }
 .scene-vignette {
   position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(circle at 50% 48%, transparent 0 28%, rgba(216,204,184,0.12) 53%, rgba(216,204,184,0.72) 100%);
+  background: radial-gradient(circle at 50% 50%, transparent 35%, rgba(1,2,4,0.3) 65%, rgba(1,2,4,0.85) 100%);
 }
 .topbar, .hud-grid, .impact-ticker { position: relative; z-index: 2; }
 .topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 20px 28px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(5,5,5,0.94), rgba(5,5,5,0.3)); backdrop-filter: blur(8px); }

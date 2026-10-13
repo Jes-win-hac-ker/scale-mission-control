@@ -547,10 +547,10 @@ function OrbitalScene() {
 
   return (
     <>
-      <color attach="background" args={["#d8ccb8"]} />
-      <fog attach="fog" args={["#d8ccb8", 8, 18]} />
-      <ambientLight intensity={0.25} />
-      <Stars radius={40} depth={20} count={900} factor={1.5} saturation={0} fade speed={0.3} />
+      <color attach="background" args={["#010204"]} />
+      <fog attach="fog" args={["#010204", 10, 25]} />
+      <ambientLight intensity={0.35} />
+      <Stars radius={50} depth={25} count={2500} factor={2.2} saturation={0.2} fade speed={0.4} />
 
       {/* Earth Centerpiece */}
       <Earth />
