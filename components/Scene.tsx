@@ -4,6 +4,7 @@ import { Line, OrbitControls, Stars } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { Debris, Drone, useMissionStore } from "@/lib/store";
 
 function GlowSphere({
@@ -91,7 +92,7 @@ function Trajectory({ drone, target }: { drone: Drone; target: Debris }) {
 }
 
 function OrbitalScene() {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const { debris, drones, selectedDebrisId } = useMissionStore();
 
   useEffect(() => {
@@ -160,18 +161,27 @@ function OrbitalScene() {
 }
 
 export default function Scene() {
+  const canvasHostRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const canvasHost = canvasHostRef.current;
+    if (!canvasHost) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      window.dispatchEvent(
+        new CustomEvent("scale:zoom", {
+          detail: event.deltaY < 0 ? "in" : "out"
+        })
+      );
+    };
+
+    canvasHost.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvasHost.removeEventListener("wheel", handleWheel);
+  }, []);
+
   return (
-    <div
-      className="scene-canvas"
-      onWheelCapture={(event) => {
-        event.preventDefault();
-        window.dispatchEvent(
-          new CustomEvent("scale:zoom", {
-            detail: event.deltaY < 0 ? "in" : "out"
-          })
-        );
-      }}
-    >
+    <div ref={canvasHostRef} className="scene-canvas">
       <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
         <OrbitalScene />
       </Canvas>
