@@ -36,6 +36,8 @@ export default function MissionControl() {
     deploySelected
   } = useMissionStore();
   const [elapsed, setElapsed] = useState(0);
+  const [manifestCollapsed, setManifestCollapsed] = useState(false);
+  const [telemetryCollapsed, setTelemetryCollapsed] = useState(false);
   const selected = debris.find((item) => item.id === selectedDebrisId) ?? debris[0];
   const availableDrone = drones.find((drone) => drone.status === "Standby");
   const securedCount = debris.filter((item) => item.status === "Secured").length;
@@ -82,16 +84,25 @@ export default function MissionControl() {
         </div>
       </header>
 
-      <section className="hud-grid">
-        <aside className="panel manifest-panel">
+      <section className={`hud-grid ${manifestCollapsed ? "left-collapsed" : ""} ${telemetryCollapsed ? "right-collapsed" : ""}`}>
+        <aside className={`panel manifest-panel ${manifestCollapsed ? "is-collapsed" : ""}`}>
           <div className="panel-heading">
-            <div>
+            <div className="panel-heading-copy">
               <span className="panel-kicker">01 / TARGET MANIFEST</span>
               <h1>Orbital debris</h1>
             </div>
-            <span className="count-badge">{debris.length.toString().padStart(2, "0")}</span>
+            <div className="panel-heading-actions">
+              <span className="count-badge">{debris.length.toString().padStart(2, "0")}</span>
+              <button
+                className="rail-toggle"
+                aria-label={manifestCollapsed ? "Expand target manifest" : "Collapse target manifest"}
+                onClick={() => setManifestCollapsed((collapsed) => !collapsed)}
+              >
+                {manifestCollapsed ? "›" : "‹"}
+              </button>
+            </div>
           </div>
-          <div className="manifest-list">
+          <div className="manifest-list panel-body">
             {debris.map((item) => (
               <button
                 key={item.id}
@@ -146,15 +157,24 @@ export default function MissionControl() {
           </AnimatePresence>
         </div>
 
-        <aside className="panel telemetry-panel">
+        <aside className={`panel telemetry-panel ${telemetryCollapsed ? "is-collapsed" : ""}`}>
           <div className="panel-heading">
-            <div>
+            <div className="panel-heading-copy">
               <span className="panel-kicker">02 / SWARM TELEMETRY</span>
               <h1>Active units</h1>
             </div>
-            <span className="online-count"><span className="live-dot" /> {drones.length} ONLINE</span>
+            <div className="panel-heading-actions">
+              <span className="online-count"><span className="live-dot" /> {drones.length} ONLINE</span>
+              <button
+                className="rail-toggle"
+                aria-label={telemetryCollapsed ? "Expand swarm telemetry" : "Collapse swarm telemetry"}
+                onClick={() => setTelemetryCollapsed((collapsed) => !collapsed)}
+              >
+                {telemetryCollapsed ? "‹" : "›"}
+              </button>
+            </div>
           </div>
-          <div className="drone-list">
+          <div className="drone-list panel-body">
             {drones.map((drone) => (
               <div className="drone-row" key={drone.id}>
                 <div className="drone-heading">
@@ -169,7 +189,7 @@ export default function MissionControl() {
               </div>
             ))}
           </div>
-          <div className="telemetry-footer">
+          <div className="telemetry-footer panel-body">
             <span>SWARM READINESS</span>
             <strong>{Math.round(drones.reduce((sum, drone) => sum + drone.fuel, 0) / drones.length)}%</strong>
           </div>
