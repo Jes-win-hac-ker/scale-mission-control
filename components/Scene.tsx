@@ -118,8 +118,8 @@ function OrbitalScene() {
 
   return (
     <>
-      <color attach="background" args={["#050505"]} />
-      <fog attach="fog" args={["#050505", 8, 18]} />
+      <color attach="background" args={["#d8ccb8"]} />
+      <fog attach="fog" args={["#d8ccb8", 8, 18]} />
       <ambientLight intensity={0.2} />
       <Stars radius={40} depth={20} count={900} factor={1.5} saturation={0} fade speed={0.3} />
       <Earth />
