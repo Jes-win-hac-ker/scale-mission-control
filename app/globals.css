@@ -19,12 +19,13 @@ body {
   background: var(--void);
   color: #edfafa;
   font-family: "Barlow Condensed", sans-serif;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 button { font: inherit; }
 button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 
-.mission-shell { position: relative; min-height: 100vh; overflow: hidden; background: #050505; }
+.mission-shell { position: relative; min-height: 100vh; overflow-x: hidden; background: #050505; }
 .scene-layer { position: absolute; inset: 0; }
 .scene-layer canvas { position: absolute !important; inset: 0; }
 .scene-vignette {
