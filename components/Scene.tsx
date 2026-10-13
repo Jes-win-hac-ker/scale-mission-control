@@ -116,7 +116,13 @@ function DroneGLBModel({
 }
 
 // Swarm Drone Visualization & Animation
-function DroneMesh({ drone }: { drone: Drone }) {
+function DroneMesh({
+  drone,
+  onSelectTarget
+}: {
+  drone: Drone;
+  onSelectTarget?: (debrisId: string) => void;
+}) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
 
@@ -182,7 +188,23 @@ function DroneMesh({ drone }: { drone: Drone }) {
   });
 
   return (
-    <group ref={groupRef} position={drone.position}>
+    <group
+      ref={groupRef}
+      position={drone.position}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (drone.targetId && onSelectTarget) {
+          onSelectTarget(drone.targetId);
+        }
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        if (drone.targetId) document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = "default";
+      }}
+    >
       {/* 3D Extraction Drone GLB Model */}
       <group ref={modelRef}>
         <DroneGLBModel status={drone.status} color={baseColor} />
@@ -455,10 +477,15 @@ function DebrisMesh({
         />
       </group>
 
-      {/* Invisible Interactive Click Hitbox (makes small realistic debris easy to click) */}
-      <mesh>
-        <sphereGeometry args={[0.075, 8, 8]} />
-        <meshBasicMaterial visible={false} />
+      {/* Interactive Raycastable Click Hitbox */}
+      <mesh
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+      >
+        <sphereGeometry args={[0.12, 16, 16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
       {/* Target Reticle for Selected Debris */}
@@ -595,7 +622,11 @@ function OrbitalScene() {
 
       {/* Drones */}
       {drones.map((drone) => (
-        <DroneMesh key={drone.id} drone={drone} />
+        <DroneMesh
+          key={drone.id}
+          drone={drone}
+          onSelectTarget={selectDebris}
+        />
       ))}
 
       {/* Dynamic Trajectories */}
@@ -624,40 +655,21 @@ function OrbitalScene() {
 
       <OrbitControls
         ref={controlsRef}
-        enablePan={false}
-        enableZoom={false}
-        enableRotate
-        minDistance={4.5}
-        maxDistance={9}
-        autoRotate
-        autoRotateSpeed={0.2}
+        enablePan={true}
+        enableZoom={true}
+        enableRotate={true}
+        minDistance={2.5}
+        maxDistance={14}
+        enableDamping={true}
+        dampingFactor={0.05}
       />
     </>
   );
 }
 
 export default function Scene() {
-  const canvasHostRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const canvasHost = canvasHostRef.current;
-    if (!canvasHost) return;
-
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      window.dispatchEvent(
-        new CustomEvent("scale:zoom", {
-          detail: event.deltaY < 0 ? "in" : "out"
-        })
-      );
-    };
-
-    canvasHost.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvasHost.removeEventListener("wheel", handleWheel);
-  }, []);
-
   return (
-    <div ref={canvasHostRef} className="scene-canvas">
+    <div className="scene-canvas">
       <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
         <Suspense fallback={null}>
           <OrbitalScene />
