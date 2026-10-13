@@ -5,77 +5,302 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { Debris, Drone, useMissionStore } from "@/lib/store";
+import {
+  Debris,
+  Drone,
+  RecoveryDepot,
+  useMissionStore
+} from "@/lib/store";
 
-function GlowSphere({
-  color,
-  position,
-  size = 0.075,
-  selected = false,
-  targetPosition,
-  startedAt,
-  wireframe = false,
-  onClick
-}: {
-  color: string;
-  position: [number, number, number];
-  size?: number;
-  selected?: boolean;
-  targetPosition?: [number, number, number];
-  startedAt?: number;
-  wireframe?: boolean;
-  onClick?: () => void;
-}) {
-  const ref = useRef<THREE.Mesh>(null);
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    const pulse = 1 + Math.sin(clock.elapsedTime * 3.5) * 0.1;
-    ref.current.scale.setScalar(selected ? pulse * 1.6 : pulse);
-    if (targetPosition && startedAt) {
-      const progress = Math.min(1, (Date.now() - startedAt) / 5000);
-      ref.current.position.lerpVectors(new THREE.Vector3(...position), new THREE.Vector3(...targetPosition), progress);
+// Smooth quadratic easing for fluid time-based movement
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+// Glowing Ring & Station for Recovery Depot "DEPOT-01"
+function RecoveryDepotRing({ depot }: { depot: RecoveryDepot }) {
+  const outerRingRef = useRef<THREE.Group>(null);
+  const innerRingRef = useRef<THREE.Mesh>(null);
+  const coreRef = useRef<THREE.Mesh>(null);
+
+  useFrame((_, delta) => {
+    if (outerRingRef.current) {
+      outerRingRef.current.rotation.z += delta * 0.45;
+      outerRingRef.current.rotation.x += delta * 0.2;
+    }
+    if (innerRingRef.current) {
+      innerRingRef.current.rotation.z -= delta * 0.6;
+    }
+    if (coreRef.current) {
+      coreRef.current.rotation.y += delta * 0.5;
     }
   });
 
   return (
-    <mesh
-      ref={ref}
-      position={position}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick?.();
+    <group position={depot.position}>
+      {/* Outer Rotating Glowing Ring */}
+      <group ref={outerRingRef}>
+        <mesh>
+          <torusGeometry args={[0.34, 0.032, 16, 64]} />
+          <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+        </mesh>
+        {/* Glow halo */}
+        <mesh scale={1.12}>
+          <torusGeometry args={[0.34, 0.015, 8, 32]} />
+          <meshBasicMaterial
+            color="#00FF66"
+            transparent
+            opacity={0.55}
+            toneMapped={false}
+          />
+        </mesh>
+        {/* Docking crossbars */}
+        <mesh rotation={[0, 0, Math.PI / 4]}>
+          <boxGeometry args={[0.68, 0.015, 0.015]} />
+          <meshBasicMaterial color="#00FFFF" transparent opacity={0.8} />
+        </mesh>
+        <mesh rotation={[0, 0, -Math.PI / 4]}>
+          <boxGeometry args={[0.68, 0.015, 0.015]} />
+          <meshBasicMaterial color="#00FFFF" transparent opacity={0.8} />
+        </mesh>
+      </group>
+
+      {/* Counter-rotating Inner Energy Ring */}
+      <mesh ref={innerRingRef}>
+        <torusGeometry args={[0.22, 0.016, 8, 32]} />
+        <meshBasicMaterial color="#00E676" transparent opacity={0.7} toneMapped={false} />
+      </mesh>
+
+      {/* Central Station Core */}
+      <mesh ref={coreRef}>
+        <octahedronGeometry args={[0.11, 0]} />
+        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
+      </mesh>
+
+      {/* Depot Beacon Light */}
+      <pointLight color="#00FFFF" intensity={2} distance={3} />
+    </group>
+  );
+}
+
+// Swarm Drone Visualization & Animation
+function DroneMesh({ drone }: { drone: Drone }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  // Status-based color mapping per prompt requirements:
+  // - Idle drones: cyan
+  // - Intercepting drones: blue
+  // - Capturing drones: pulsing white
+  // - Returning drones: green
+  // - Recovered: green
+  const baseColor = useMemo(() => {
+    switch (drone.status) {
+      case "idle":
+        return "#00FFFF"; // cyan
+      case "assigned":
+      case "intercepting":
+        return "#2979FF"; // blue
+      case "capturing":
+        return "#FFFFFF"; // pulsing white
+      case "returning":
+      case "recovered":
+        return "#00FF66"; // green
+      case "error":
+        return "#FF0033"; // red
+      default:
+        return "#00FFFF";
+    }
+  }, [drone.status]);
+
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+
+    // Time-based movement with easing function
+    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
+      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+      const eased = easeInOutQuad(progress);
+
+      groupRef.current.position.set(
+        THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
+        THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
+        THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
+      );
+    } else {
+      groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
+    }
+
+    // Visual pulsation & idle dynamics
+    if (meshRef.current) {
+      if (drone.status === "capturing") {
+        // Fast white pulse during capture
+        const pulse = 1 + Math.sin(clock.elapsedTime * 14) * 0.45;
+        meshRef.current.scale.setScalar(pulse * 1.3);
+      } else {
+        const subtlePulse = 1 + Math.sin(clock.elapsedTime * 3.2) * 0.08;
+        meshRef.current.scale.setScalar(subtlePulse);
+      }
+    }
+
+    if (ringRef.current) {
+      ringRef.current.rotation.z += 0.03;
+      ringRef.current.rotation.x += 0.015;
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={drone.position}>
+      {/* Central Drone Core */}
+      <mesh ref={meshRef}>
+        <octahedronGeometry args={[0.075, 1]} />
+        <meshBasicMaterial color={baseColor} toneMapped={false} />
+      </mesh>
+
+      {/* Thruster Gimbal Ring */}
+      <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.11, 0.009, 8, 24]} />
+        <meshBasicMaterial
+          color={baseColor}
+          transparent
+          opacity={0.8}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+// Debris Visualization & Animation
+function DebrisMesh({
+  debris,
+  selected,
+  assignedDrone,
+  onClick
+}: {
+  debris: Debris;
+  selected: boolean;
+  assignedDrone?: Drone;
+  onClick: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  // Status-based color mapping per prompt requirements:
+  // - Targeted debris: amber
+  // - Captured debris: green
+  // - Available debris: red
+  const color = useMemo(() => {
+    switch (debris.status) {
+      case "available":
+        return "#FF0033"; // red
+      case "targeted":
+        return "#FFBF00"; // amber
+      case "captured":
+      case "recovered":
+        return "#00FF66"; // green
+      default:
+        return "#FF0033";
+    }
+  }, [debris.status]);
+
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+
+    // When captured and drone is returning, debris position follows drone
+    if (
+      debris.status === "captured" &&
+      assignedDrone?.flight &&
+      assignedDrone.status === "returning"
+    ) {
+      const elapsed = (Date.now() - assignedDrone.flight.startTime) / 1000;
+      const progress = Math.min(1, Math.max(0, elapsed / assignedDrone.flight.duration));
+      const eased = easeInOutQuad(progress);
+
+      groupRef.current.position.set(
+        THREE.MathUtils.lerp(
+          assignedDrone.flight.startPosition[0],
+          assignedDrone.flight.targetPosition[0],
+          eased
+        ),
+        THREE.MathUtils.lerp(
+          assignedDrone.flight.startPosition[1],
+          assignedDrone.flight.targetPosition[1],
+          eased
+        ),
+        THREE.MathUtils.lerp(
+          assignedDrone.flight.startPosition[2],
+          assignedDrone.flight.targetPosition[2],
+          eased
+        )
+      );
+    } else {
+      groupRef.current.position.set(debris.position[0], debris.position[1], debris.position[2]);
+    }
+
+    if (meshRef.current) {
+      meshRef.current.rotation.x += 0.007;
+      meshRef.current.rotation.y += 0.01;
+
+      if (selected) {
+        const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.15;
+        meshRef.current.scale.setScalar(pulse * 1.25);
+      } else {
+        meshRef.current.scale.setScalar(1);
+      }
+    }
+  });
+
+  return (
+    <group
+      ref={groupRef}
+      position={debris.position}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
       }}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        document.body.style.cursor = onClick ? "pointer" : "default";
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        document.body.style.cursor = "pointer";
       }}
       onPointerOut={() => {
         document.body.style.cursor = "default";
       }}
     >
-      <icosahedronGeometry args={[size, 1]} />
-      <meshBasicMaterial
-        color={color}
-        toneMapped={false}
-        wireframe={wireframe}
-        transparent={wireframe}
-        opacity={wireframe ? 0.95 : 1}
-      />
+      <mesh ref={meshRef}>
+        <dodecahedronGeometry args={[debris.status === "recovered" ? 0.038 : 0.055, 0]} />
+        <meshBasicMaterial
+          color={color}
+          wireframe={debris.status === "available" || debris.status === "targeted"}
+          toneMapped={false}
+          transparent
+          opacity={debris.status === "recovered" ? 0.45 : 0.95}
+        />
+      </mesh>
+
+      {/* Target Reticle for Selected Debris */}
       {selected && (
         <mesh scale={1.8}>
-          <ringGeometry args={[size * 1.8, size * 2.2, 32]} />
-          <meshBasicMaterial color="#FF0033" transparent opacity={0.9} side={THREE.DoubleSide} />
+          <ringGeometry args={[0.07, 0.09, 32]} />
+          <meshBasicMaterial
+            color="#FFBF00"
+            transparent
+            opacity={0.9}
+            side={THREE.DoubleSide}
+          />
         </mesh>
       )}
-    </mesh>
+    </group>
   );
 }
 
+// Earth Visualization
 function Earth() {
   const earthRef = useRef<THREE.Group>(null);
   const earthTexture = useMemo(() => new THREE.TextureLoader().load("/earth-map.svg"), []);
   useFrame((_, delta) => {
-    if (earthRef.current) earthRef.current.rotation.y += delta * 0.08;
+    if (earthRef.current) earthRef.current.rotation.y += delta * 0.06;
   });
 
   return (
@@ -104,25 +329,31 @@ function Earth() {
   );
 }
 
-function Trajectory({ drone, target }: { drone: Drone; target: Debris }) {
-  const points = useMemo(() => [drone.position, target.position], [drone.position, target.position]);
+// Active Trajectory Vectors
+function ActiveTrajectory({
+  points,
+  color
+}: {
+  points: [[number, number, number], [number, number, number]];
+  color: string;
+}) {
   return (
     <Line
       points={points}
-      color="#00FFFF"
-      lineWidth={1.2}
+      color={color}
+      lineWidth={1.4}
       dashed
       dashSize={0.08}
       gapSize={0.05}
       transparent
-      opacity={0.9}
+      opacity={0.85}
     />
   );
 }
 
 function OrbitalScene() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const { debris, drones, selectedDebrisId, selectDebris } = useMissionStore();
+  const { debris, drones, depot, selectedDebrisId, selectDebris } = useMissionStore();
 
   useEffect(() => {
     const handleZoom = (event: Event) => {
@@ -130,9 +361,9 @@ function OrbitalScene() {
       const controls = controlsRef.current;
       if (!controls) return;
 
-      const distance = controls.object.position.distanceTo(controls.target);
+      const distanceVal = controls.object.position.distanceTo(controls.target);
       const nextDistance = THREE.MathUtils.clamp(
-        distance + (direction === "in" ? -0.65 : 0.65),
+        distanceVal + (direction === "in" ? -0.65 : 0.65),
         4.5,
         9
       );
@@ -149,36 +380,55 @@ function OrbitalScene() {
     <>
       <color attach="background" args={["#d8ccb8"]} />
       <fog attach="fog" args={["#d8ccb8", 8, 18]} />
-      <ambientLight intensity={0.2} />
+      <ambientLight intensity={0.25} />
       <Stars radius={40} depth={20} count={900} factor={1.5} saturation={0} fade speed={0.3} />
+
+      {/* Earth Centerpiece */}
       <Earth />
+
+      {/* Recovery Depot Glowing Ring & Station */}
+      <RecoveryDepotRing depot={depot} />
+
+      {/* Debris Swarm */}
       {debris.map((item) => (
-        <GlowSphere
+        <DebrisMesh
           key={item.id}
-          color={item.id === selectedDebrisId ? "#FF0033" : item.status === "Secured" ? "#536566" : "#FF0033"}
-          position={item.position}
-          size={item.status === "Secured" ? 0.038 : 0.052}
+          debris={item}
           selected={item.id === selectedDebrisId}
-          wireframe
+          assignedDrone={drones.find((d) => d.targetId === item.id)}
           onClick={() => selectDebris(item.id)}
         />
       ))}
+
+      {/* Drones */}
       {drones.map((drone) => (
-        <GlowSphere
-          key={drone.id}
-          color="#00FFFF"
-          position={drone.position}
-          size={0.095}
-          targetPosition={debris.find((item) => item.id === drone.targetId)?.position}
-          startedAt={drone.interceptStartedAt}
-        />
+        <DroneMesh key={drone.id} drone={drone} />
       ))}
+
+      {/* Dynamic Trajectories */}
       {drones.map((drone) => {
-        const target = debris.find((item) => item.id === drone.targetId);
-        return drone.status === "Intercepting" && target ? (
-          <Trajectory key={`${drone.id}-${target.id}`} drone={drone} target={target} />
-        ) : null;
+        if (!drone.flight) return null;
+        if (drone.status === "intercepting") {
+          return (
+            <ActiveTrajectory
+              key={`traj-${drone.id}-intercept`}
+              points={[drone.flight.startPosition, drone.flight.targetPosition]}
+              color="#2979FF"
+            />
+          );
+        }
+        if (drone.status === "returning") {
+          return (
+            <ActiveTrajectory
+              key={`traj-${drone.id}-return`}
+              points={[drone.flight.startPosition, drone.flight.targetPosition]}
+              color="#00FF66"
+            />
+          );
+        }
+        return null;
       })}
+
       <OrbitControls
         ref={controlsRef}
         enablePan={false}
