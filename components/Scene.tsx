@@ -152,21 +152,152 @@ function DroneMesh({ drone }: { drone: Drone }) {
 
   return (
     <group ref={groupRef} position={drone.position}>
-      {/* Central Drone Core */}
+      {/* Central Drone Chassis */}
       <mesh ref={meshRef}>
-        <octahedronGeometry args={[0.075, 1]} />
+        <octahedronGeometry args={[0.07, 1]} />
         <meshBasicMaterial color={baseColor} toneMapped={false} />
       </mesh>
 
       {/* Thruster Gimbal Ring */}
       <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.11, 0.009, 8, 24]} />
+        <torusGeometry args={[0.1, 0.008, 8, 24]} />
         <meshBasicMaterial
           color={baseColor}
           transparent
           opacity={0.8}
           toneMapped={false}
         />
+      </mesh>
+
+      {/* 4 Outrigger RCS Pods */}
+      <mesh position={[0.09, 0, 0]}>
+        <boxGeometry args={[0.03, 0.02, 0.03]} />
+        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
+      </mesh>
+      <mesh position={[-0.09, 0, 0]}>
+        <boxGeometry args={[0.03, 0.02, 0.03]} />
+        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0, 0.09]}>
+        <boxGeometry args={[0.02, 0.03, 0.03]} />
+        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0, -0.09]}>
+        <boxGeometry args={[0.02, 0.03, 0.03]} />
+        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
+      </mesh>
+
+      {/* Active Propulsion Plume during Intercept / Return */}
+      {(drone.status === "intercepting" || drone.status === "returning") && (
+        <mesh position={[0, -0.09, 0]} rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[0.035, 0.1, 8]} />
+          <meshBasicMaterial
+            color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
+            transparent
+            opacity={0.85}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// Procedural Debris Geometries: Randomized Rocks, Rocket Parts, Solar Arrays, and Shards
+function DebrisShape({
+  material,
+  color,
+  wireframe,
+  opacity,
+  scale
+}: {
+  material?: string;
+  color: string;
+  wireframe: boolean;
+  opacity: number;
+  scale: number;
+}) {
+  const mat = (material || "").toLowerCase();
+
+  // 1. Defunct Satellite / Solar Array
+  if (mat.includes("solar") || mat.includes("battery")) {
+    return (
+      <group scale={scale}>
+        {/* Central Satellite Body */}
+        <mesh>
+          <boxGeometry args={[0.7, 0.7, 0.7]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* Left Solar Panel */}
+        <mesh position={[-1.15, 0, 0]}>
+          <boxGeometry args={[1.3, 0.55, 0.05]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* Right Solar Panel */}
+        <mesh position={[1.15, 0, 0]}>
+          <boxGeometry args={[1.3, 0.55, 0.05]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* High-gain Antenna Rod */}
+        <mesh position={[0, 0.55, 0]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.45, 6]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 2. Spent Rocket Stage / Reaction Wheel / Engine
+  if (mat.includes("wheel") || mat.includes("fairing") || mat.includes("reaction")) {
+    return (
+      <group scale={scale}>
+        {/* Cylindrical Booster Body */}
+        <mesh rotation={[Math.PI / 4, 0, 0]}>
+          <cylinderGeometry args={[0.38, 0.45, 1.4, 10]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* Rocket Nozzle / Engine Bell */}
+        <mesh position={[0, -0.85, 0]} rotation={[Math.PI / 4, 0, 0]}>
+          <coneGeometry args={[0.48, 0.5, 10]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* Interstage Ring */}
+        <mesh position={[0, 0.35, 0]} rotation={[Math.PI / 4, 0, 0]}>
+          <torusGeometry args={[0.42, 0.05, 8, 16]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 3. Structural Strut / Shard
+  if (mat.includes("strut") || mat.includes("shielding")) {
+    return (
+      <group scale={scale}>
+        {/* Angular Shard Plate */}
+        <mesh rotation={[0.4, 0.5, 0.2]}>
+          <octahedronGeometry args={[0.85, 0]} />
+          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+        {/* Broken Truss Rod */}
+        <mesh rotation={[0.6, -0.3, 0.8]}>
+          <cylinderGeometry args={[0.05, 0.05, 1.6, 6]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 4. Randomized Space Rock / Asteroid Fragment
+  return (
+    <group scale={scale}>
+      <mesh>
+        <dodecahedronGeometry args={[0.8, 1]} />
+        <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+      </mesh>
+      <mesh scale={0.55} position={[0.35, 0.3, -0.25]}>
+        <tetrahedronGeometry args={[0.7, 0]} />
+        <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
       </mesh>
     </group>
   );
@@ -185,7 +316,7 @@ function DebrisMesh({
   onClick: () => void;
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const meshRef = useRef<THREE.Mesh>(null);
+  const visualRef = useRef<THREE.Group>(null);
 
   // Status-based color mapping per prompt requirements:
   // - Targeted debris: amber
@@ -204,6 +335,25 @@ function DebrisMesh({
         return "#FF0033";
     }
   }, [debris.status]);
+
+  // Unique tumbling rate & axes for each debris object
+  const spinVector = useMemo(() => {
+    // Generate deterministic pseudo-random spin from debris id
+    const hash = debris.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return [
+      0.005 + ((hash % 11) / 10) * 0.015,
+      0.008 + ((hash % 13) / 10) * 0.015,
+      0.004 + ((hash % 7) / 10) * 0.012
+    ];
+  }, [debris.id]);
+
+  // Proportional scale: realistic relative to Earth (radius 1.35), scaled by mass
+  const baseScale = useMemo(() => {
+    // Sized between 0.025 and 0.048 based on mass (80kg - 450kg)
+    const massFactor = Math.min(1, Math.max(0, (debris.mass - 80) / 360));
+    const normalScale = 0.026 + massFactor * 0.018;
+    return debris.status === "recovered" ? normalScale * 0.7 : normalScale;
+  }, [debris.mass, debris.status]);
 
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
@@ -239,15 +389,17 @@ function DebrisMesh({
       groupRef.current.position.set(debris.position[0], debris.position[1], debris.position[2]);
     }
 
-    if (meshRef.current) {
-      meshRef.current.rotation.x += 0.007;
-      meshRef.current.rotation.y += 0.01;
+    // Natural multi-axis tumbling rotation
+    if (visualRef.current) {
+      visualRef.current.rotation.x += spinVector[0];
+      visualRef.current.rotation.y += spinVector[1];
+      visualRef.current.rotation.z += spinVector[2];
 
       if (selected) {
-        const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.15;
-        meshRef.current.scale.setScalar(pulse * 1.25);
+        const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.18;
+        visualRef.current.scale.setScalar(pulse);
       } else {
-        meshRef.current.scale.setScalar(1);
+        visualRef.current.scale.setScalar(1);
       }
     }
   });
@@ -268,28 +420,45 @@ function DebrisMesh({
         document.body.style.cursor = "default";
       }}
     >
-      <mesh ref={meshRef}>
-        <dodecahedronGeometry args={[debris.status === "recovered" ? 0.038 : 0.055, 0]} />
-        <meshBasicMaterial
+      {/* Visual Procedural Mesh Group */}
+      <group ref={visualRef}>
+        <DebrisShape
+          material={debris.material}
           color={color}
           wireframe={debris.status === "available" || debris.status === "targeted"}
-          toneMapped={false}
-          transparent
           opacity={debris.status === "recovered" ? 0.45 : 0.95}
+          scale={baseScale}
         />
+      </group>
+
+      {/* Invisible Interactive Click Hitbox (makes small realistic debris easy to click) */}
+      <mesh>
+        <sphereGeometry args={[0.075, 8, 8]} />
+        <meshBasicMaterial visible={false} />
       </mesh>
 
       {/* Target Reticle for Selected Debris */}
       {selected && (
-        <mesh scale={1.8}>
-          <ringGeometry args={[0.07, 0.09, 32]} />
-          <meshBasicMaterial
-            color="#FFBF00"
-            transparent
-            opacity={0.9}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
+        <group>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.08, 0.095, 32]} />
+            <meshBasicMaterial
+              color="#FFBF00"
+              transparent
+              opacity={0.9}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          <mesh>
+            <ringGeometry args={[0.08, 0.095, 32]} />
+            <meshBasicMaterial
+              color="#FFBF00"
+              transparent
+              opacity={0.7}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </group>
       )}
     </group>
   );
