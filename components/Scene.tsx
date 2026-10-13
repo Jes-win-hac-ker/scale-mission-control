@@ -1,8 +1,8 @@
 "use client";
 
-import { Line, OrbitControls, Stars } from "@react-three/drei";
+import { Line, OrbitControls, Stars, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
@@ -83,11 +83,42 @@ function RecoveryDepotRing({ depot }: { depot: RecoveryDepot }) {
   );
 }
 
+// 3D GLB Model Instance for Swarm Drones
+function DroneGLBModel({
+  status,
+  color
+}: {
+  status: Drone["status"];
+  color: string;
+}) {
+  const { scene } = useGLTF("/scale-extraction-drone.glb");
+
+  const cloned = useMemo(() => {
+    const clone = scene.clone(true);
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (mesh.material) {
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map((m) => m.clone());
+          } else {
+            mesh.material = mesh.material.clone();
+          }
+        }
+      }
+    });
+    return clone;
+  }, [scene]);
+
+  return <primitive object={cloned} scale={0.065} />;
+}
+
 // Swarm Drone Visualization & Animation
 function DroneMesh({ drone }: { drone: Drone }) {
   const groupRef = useRef<THREE.Group>(null);
-  const meshRef = useRef<THREE.Mesh>(null);
-  const ringRef = useRef<THREE.Mesh>(null);
+  const modelRef = useRef<THREE.Group>(null);
 
   // Status-based color mapping per prompt requirements:
   // - Idle drones: cyan
@@ -123,82 +154,75 @@ function DroneMesh({ drone }: { drone: Drone }) {
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
 
-      groupRef.current.position.set(
-        THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
-        THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
-        THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
-      );
+      const targetX = THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased);
+      const targetY = THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased);
+      const targetZ = THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased);
+
+      groupRef.current.position.set(targetX, targetY, targetZ);
+
+      // Dynamically orient drone toward flight target vector
+      if (modelRef.current) {
+        const flightTarget = new THREE.Vector3(...drone.flight.targetPosition);
+        modelRef.current.lookAt(flightTarget);
+      }
     } else {
       groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
-    }
-
-    // Visual pulsation & idle dynamics
-    if (meshRef.current) {
-      if (drone.status === "capturing") {
-        // Fast white pulse during capture
-        const pulse = 1 + Math.sin(clock.elapsedTime * 14) * 0.45;
-        meshRef.current.scale.setScalar(pulse * 1.3);
-      } else {
-        const subtlePulse = 1 + Math.sin(clock.elapsedTime * 3.2) * 0.08;
-        meshRef.current.scale.setScalar(subtlePulse);
+      if (modelRef.current) {
+        modelRef.current.rotation.y += 0.006;
       }
     }
 
-    if (ringRef.current) {
-      ringRef.current.rotation.z += 0.03;
-      ringRef.current.rotation.x += 0.015;
+    // Capture visual pulse
+    if (modelRef.current && drone.status === "capturing") {
+      const pulse = 1 + Math.sin(clock.elapsedTime * 14) * 0.25;
+      modelRef.current.scale.setScalar(pulse);
+    } else if (modelRef.current) {
+      modelRef.current.scale.setScalar(1);
     }
   });
 
   return (
     <group ref={groupRef} position={drone.position}>
-      {/* Central Drone Chassis */}
-      <mesh ref={meshRef}>
-        <octahedronGeometry args={[0.07, 1]} />
-        <meshBasicMaterial color={baseColor} toneMapped={false} />
-      </mesh>
+      {/* 3D Extraction Drone GLB Model */}
+      <group ref={modelRef}>
+        <DroneGLBModel status={drone.status} color={baseColor} />
 
-      {/* Thruster Gimbal Ring */}
-      <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.1, 0.008, 8, 24]} />
+        {/* Dynamic Thruster / Engine Plume during Flight */}
+        {(drone.status === "intercepting" || drone.status === "returning") && (
+          <group position={[0, 0, -0.09]} rotation={[Math.PI / 2, 0, 0]}>
+            <mesh>
+              <coneGeometry args={[0.035, 0.12, 8]} />
+              <meshBasicMaterial
+                color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
+                transparent
+                opacity={0.85}
+                toneMapped={false}
+              />
+            </mesh>
+            <pointLight
+              color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
+              intensity={2}
+              distance={0.8}
+            />
+          </group>
+        )}
+
+        {/* Capturing Pulse Emitter Light */}
+        {drone.status === "capturing" && (
+          <pointLight color="#ffffff" intensity={3} distance={0.6} />
+        )}
+      </group>
+
+      {/* Orbiting Status Beacon Ring */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.09, 0.005, 8, 24]} />
         <meshBasicMaterial
           color={baseColor}
           transparent
-          opacity={0.8}
+          opacity={0.7}
           toneMapped={false}
         />
       </mesh>
-
-      {/* 4 Outrigger RCS Pods */}
-      <mesh position={[0.09, 0, 0]}>
-        <boxGeometry args={[0.03, 0.02, 0.03]} />
-        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
-      </mesh>
-      <mesh position={[-0.09, 0, 0]}>
-        <boxGeometry args={[0.03, 0.02, 0.03]} />
-        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0, 0.09]}>
-        <boxGeometry args={[0.02, 0.03, 0.03]} />
-        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0, -0.09]}>
-        <boxGeometry args={[0.02, 0.03, 0.03]} />
-        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
-      </mesh>
-
-      {/* Active Propulsion Plume during Intercept / Return */}
-      {(drone.status === "intercepting" || drone.status === "returning") && (
-        <mesh position={[0, -0.09, 0]} rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.035, 0.1, 8]} />
-          <meshBasicMaterial
-            color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
-            transparent
-            opacity={0.85}
-            toneMapped={false}
-          />
-        </mesh>
-      )}
     </group>
   );
 }
@@ -635,8 +659,12 @@ export default function Scene() {
   return (
     <div ref={canvasHostRef} className="scene-canvas">
       <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
-        <OrbitalScene />
+        <Suspense fallback={null}>
+          <OrbitalScene />
+        </Suspense>
       </Canvas>
     </div>
   );
 }
+
+useGLTF.preload("/scale-extraction-drone.glb");
