@@ -49,6 +49,7 @@ function GlowSphere({
 
 function Earth() {
   const earthRef = useRef<THREE.Group>(null);
+  const earthTexture = useMemo(() => new THREE.TextureLoader().load("/earth-map.svg"), []);
   useFrame((_, delta) => {
     if (earthRef.current) earthRef.current.rotation.y += delta * 0.08;
   });
@@ -57,11 +58,15 @@ function Earth() {
     <group ref={earthRef}>
       <mesh>
         <icosahedronGeometry args={[1.35, 2]} />
-        <meshBasicMaterial color="#0a3438" wireframe transparent opacity={0.8} />
+        <meshBasicMaterial color="#76e6e9" wireframe transparent opacity={0.22} />
       </mesh>
       <mesh scale={0.96}>
         <sphereGeometry args={[1.35, 32, 32]} />
-        <meshBasicMaterial color="#06181a" transparent opacity={0.92} />
+        <meshBasicMaterial map={earthTexture} color="#d3ffff" transparent opacity={0.98} />
+      </mesh>
+      <mesh scale={0.985}>
+        <sphereGeometry args={[1.35, 32, 32]} />
+        <meshBasicMaterial color="#d7ffff" transparent opacity={0.1} wireframe />
       </mesh>
       <mesh rotation={[Math.PI / 2.15, 0.4, 0]}>
         <torusGeometry args={[1.62, 0.008, 8, 96]} />

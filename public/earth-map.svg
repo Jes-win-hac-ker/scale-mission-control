@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="ocean" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d5260"/>
+      <stop offset=".5" stop-color="#08313e"/>
+      <stop offset="1" stop-color="#041b29"/>
+    </linearGradient>
+    <linearGradient id="land" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#a6c36f"/>
+      <stop offset=".48" stop-color="#6f9d5a"/>
+      <stop offset="1" stop-color="#315e4c"/>
+    </linearGradient>
+    <pattern id="grid" width="60" height="30" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V30" fill="none" stroke="#65e3e4" stroke-opacity=".18" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="600" fill="url(#ocean)"/>
+  <path d="M0 100C210 65 400 130 600 100S990 75 1200 110V0H0Z" fill="#57a6ad" opacity=".12"/>
+  <path d="M0 500c230-40 400 35 600 0s390-40 600 0v100H0Z" fill="#020f1b" opacity=".3"/>
+  <g fill="url(#land)" stroke="#c9da88" stroke-opacity=".25" stroke-width="3">
+    <!-- North America -->
+    <path d="M103 102l47-25 58 9 31 35 47 13 22 38-17 29-33-8-25 22-38-9-28 30-33-11-18-42-39-15-18-31z"/>
+    <path d="M299 203l31 11 17 30-18 31-29-8-19-29z"/>
+    <!-- South America -->
+    <path d="M361 292l44 11 31 37-10 42-25 33-12 63-29 53-24-30 7-47-18-42 13-38-20-28z"/>
+    <!-- Europe -->
+    <path d="M563 126l33-19 40 4 21 20-15 22-29 5-20-12-30 8-20-14z"/>
+    <!-- Africa -->
+    <path d="M559 196l44-20 55 21 24 47-18 45-22 58-41 53-36-18-17-49 10-48-20-39z"/>
+    <!-- Asia -->
+    <path d="M642 118l53-19 84 11 45 31 68 3 61 35 5 37-42 13-38 31-62-3-41 26-49-18-33-38-52-12 4-34z"/>
+    <!-- India / southeast Asia -->
+    <path d="M748 245l41 5 34 36-24 26-29-13-27-31z"/>
+    <path d="M841 262l32 3 28 31-16 21-33-9-22-25z"/>
+    <!-- Australia -->
+    <path d="M934 410l66-12 57 26 18 41-43 31-57-4-54-29z"/>
+    <!-- Greenland -->
+    <path d="M367 44l56-21 57 23-17 48-58 13-42-25z"/>
+  </g>
+  <g fill="none" stroke="#8eecee" stroke-opacity=".2" stroke-width="2">
+    <path d="M0 150c260-48 520 48 780 0s340-38 420 0"/>
+    <path d="M0 300c260-48 520 48 780 0s340-38 420 0"/>
+    <path d="M0 450c260-48 520 48 780 0s340-38 420 0"/>
+  </g>
+  <rect width="1200" height="600" fill="url(#grid)" opacity=".55"/>
+</svg>
