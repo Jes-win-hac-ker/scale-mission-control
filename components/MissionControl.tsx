@@ -42,6 +42,9 @@ export default function MissionControl() {
   const availableDrone = drones.find((drone) => drone.status === "Standby");
   const securedCount = debris.filter((item) => item.status === "Secured").length;
   const riskMitigated = Math.round((securedCount / debris.length) * 100);
+  const zoomScene = (direction: "in" | "out") => {
+    window.dispatchEvent(new CustomEvent("scale:zoom", { detail: direction }));
+  };
 
   useEffect(() => {
     const interval = window.setInterval(() => setElapsed(Date.now() - missionStartedAt), 1000);
@@ -127,6 +130,10 @@ export default function MissionControl() {
           <div className="orbit-readout">
             <span>LEO ALTITUDE</span>
             <strong>408.2 KM</strong>
+          </div>
+          <div className="scene-controls" aria-label="Orbital camera controls">
+            <button onClick={() => zoomScene("in")} aria-label="Zoom in">+</button>
+            <button onClick={() => zoomScene("out")} aria-label="Zoom out">−</button>
           </div>
           <AnimatePresence mode="wait">
             <motion.div

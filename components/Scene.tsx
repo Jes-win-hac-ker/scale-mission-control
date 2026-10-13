@@ -2,7 +2,7 @@
 
 import { Line, OrbitControls, Stars } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { Debris, Drone, useMissionStore } from "@/lib/store";
 
@@ -91,7 +91,30 @@ function Trajectory({ drone, target }: { drone: Drone; target: Debris }) {
 }
 
 function OrbitalScene() {
+  const controlsRef = useRef<any>(null);
   const { debris, drones, selectedDebrisId } = useMissionStore();
+
+  useEffect(() => {
+    const handleZoom = (event: Event) => {
+      const direction = (event as CustomEvent<"in" | "out">).detail;
+      const controls = controlsRef.current;
+      if (!controls) return;
+
+      const distance = controls.object.position.distanceTo(controls.target);
+      const nextDistance = THREE.MathUtils.clamp(
+        distance + (direction === "in" ? -0.65 : 0.65),
+        4.5,
+        9
+      );
+      const directionVector = controls.object.position.clone().sub(controls.target).normalize();
+      controls.object.position.copy(controls.target).add(directionVector.multiplyScalar(nextDistance));
+      controls.update();
+    };
+
+    window.addEventListener("scale:zoom", handleZoom);
+    return () => window.removeEventListener("scale:zoom", handleZoom);
+  }, []);
+
   return (
     <>
       <color attach="background" args={["#050505"]} />
@@ -124,7 +147,14 @@ function OrbitalScene() {
           <Trajectory key={`${drone.id}-${target.id}`} drone={drone} target={target} />
         ) : null;
       })}
-      <OrbitControls enablePan={false} minDistance={4.5} maxDistance={9} autoRotate autoRotateSpeed={0.2} />
+      <OrbitControls
+        ref={controlsRef}
+        enablePan={false}
+        minDistance={4.5}
+        maxDistance={9}
+        autoRotate
+        autoRotateSpeed={0.2}
+      />
     </>
   );
 }

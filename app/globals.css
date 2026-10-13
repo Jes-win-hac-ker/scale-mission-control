@@ -79,6 +79,9 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 .live-dot { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
 .orbit-readout { align-self: flex-end; display: grid; gap: 5px; color: var(--muted); text-align: right; }
 .orbit-readout strong { color: #e9ffff; font: 500 16px "JetBrains Mono", monospace; }
+.scene-controls { align-self: flex-end; display: flex; gap: 6px; margin-top: auto; pointer-events: auto; }
+.scene-controls button { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 1px solid rgba(0,255,255,.35); color: var(--cyan); background: rgba(5,5,5,.6); font: 500 21px/1 "JetBrains Mono", monospace; cursor: pointer; transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease; }
+.scene-controls button:hover { color: var(--void); border-color: var(--cyan); background: var(--cyan); transform: translateY(-2px); }
 .target-focus { align-self: center; width: min(360px, 100%); padding: 16px; border: 1px solid rgba(255,191,0,.38); background: rgba(5,5,5,.66); backdrop-filter: blur(10px); pointer-events: auto; box-shadow: 0 20px 55px rgba(0,0,0,.35); }
 .focus-title { display: flex; justify-content: space-between; align-items: center; margin: 10px 0 12px; }
 .focus-title h2 { margin: 0; color: #fff; font: 600 37px/1 "JetBrains Mono", monospace; letter-spacing: -.08em; }
