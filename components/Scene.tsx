@@ -161,8 +161,20 @@ function OrbitalScene() {
 
 export default function Scene() {
   return (
-    <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
-      <OrbitalScene />
-    </Canvas>
+    <div
+      className="scene-canvas"
+      onWheelCapture={(event) => {
+        event.preventDefault();
+        window.dispatchEvent(
+          new CustomEvent("scale:zoom", {
+            detail: event.deltaY < 0 ? "in" : "out"
+          })
+        );
+      }}
+    >
+      <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
+        <OrbitalScene />
+      </Canvas>
+    </div>
   );
 }

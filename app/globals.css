@@ -27,7 +27,8 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 
 .mission-shell { position: relative; min-height: 100vh; overflow-x: hidden; background: #050505; }
 .scene-layer { position: absolute; inset: 0; }
-.scene-layer canvas { position: absolute !important; inset: 0; }
+.scene-canvas, .scene-layer canvas { position: absolute !important; inset: 0; }
+.scene-canvas { touch-action: none; }
 .scene-vignette {
   position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(circle at 50% 48%, transparent 0 28%, rgba(5,5,5,0.15) 53%, rgba(5,5,5,0.88) 100%);
