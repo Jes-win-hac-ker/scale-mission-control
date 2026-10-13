@@ -125,6 +125,7 @@ function DroneMesh({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
+  const debrisList = useMissionStore((state) => state.debris);
 
   // Status-based color mapping per prompt requirements:
   // - Idle drones: cyan
@@ -150,6 +151,14 @@ function DroneMesh({
         return "#00FFFF";
     }
   }, [drone.status]);
+
+  // Carried debris when actively capturing or returning payload to Docking Station
+  const carriedDebris = useMemo(() => {
+    if (!drone.targetId || (drone.status !== "capturing" && drone.status !== "returning")) {
+      return null;
+    }
+    return debrisList.find((d) => d.id === drone.targetId) || null;
+  }, [drone.targetId, drone.status, debrisList]);
 
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
@@ -209,6 +218,19 @@ function DroneMesh({
       <group ref={modelRef}>
         <DroneGLBModel status={drone.status} color={baseColor} />
 
+        {/* Carried Debris clamped firmly in Forward Extraction Claws during Capture/Transit */}
+        {carriedDebris && (
+          <group position={[0, 0, 0.068]} scale={0.7}>
+            <DebrisShape
+              material={carriedDebris.material}
+              color="#00FF66"
+              wireframe={false}
+              opacity={1}
+              scale={0.032}
+            />
+          </group>
+        )}
+
         {/* Dynamic Thruster / Engine Plume during Flight */}
         {(drone.status === "intercepting" || drone.status === "returning") && (
           <group position={[0, 0, -0.09]} rotation={[Math.PI / 2, 0, 0]}>
@@ -249,19 +271,128 @@ function DroneMesh({
   );
 }
 
-// Procedural Debris Geometries: Randomized Rocks, Rocket Parts, Solar Arrays, and Shards
+// 3D GLB Model Instance for Spent Rocket Stage Debris
+function RocketStageModel({
+  color,
+  wireframe = false,
+  opacity = 1,
+  scale = 1
+}: {
+  color: string;
+  wireframe?: boolean;
+  opacity?: number;
+  scale?: number;
+}) {
+  const { scene } = useGLTF("/scale-extraction-drone-debry.glb");
+
+  const cloned = useMemo(() => {
+    const aux = scene.children[0];
+    const rocketNode = aux?.children[5];
+    if (!rocketNode) return new THREE.Group();
+
+    const clone = rocketNode.clone(true);
+    // Center rocket along Z (offset ~ -0.8775)
+    clone.position.set(0, 0, -0.8775);
+
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.material = new THREE.MeshStandardMaterial({
+          color: wireframe ? color : "#94a3b8",
+          metalness: 0.85,
+          roughness: 0.28,
+          wireframe: !!wireframe,
+          transparent: opacity < 1,
+          opacity: opacity
+        });
+      }
+    });
+
+    const wrapper = new THREE.Group();
+    wrapper.add(clone);
+    return wrapper;
+  }, [scene, color, wireframe, opacity]);
+
+  return <primitive object={cloned} scale={scale} />;
+}
+
+// 3D GLB Model Instance for Chondrite Meteorite / Asteroid Debris
+function MeteoriteModel({
+  color,
+  wireframe = false,
+  opacity = 1,
+  scale = 1
+}: {
+  color: string;
+  wireframe?: boolean;
+  opacity?: number;
+  scale?: number;
+}) {
+  const { scene } = useGLTF("/scale-extraction-drone-debry.glb");
+
+  const cloned = useMemo(() => {
+    const aux = scene.children[0];
+    const meteorNode = aux?.children[6];
+    if (!meteorNode) return new THREE.Group();
+
+    const clone = meteorNode.clone(true);
+    // Reset local position offset (z was 1.265 in GLB) to pivot exactly at (0, 0, 0)
+    clone.position.set(0, 0, 0);
+
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (mesh.material) {
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map((m) => {
+              const cl = (m as THREE.Material).clone();
+              if (wireframe && "wireframe" in cl) {
+                (cl as THREE.MeshStandardMaterial).wireframe = true;
+                (cl as THREE.MeshStandardMaterial).color = new THREE.Color(color);
+              }
+              cl.transparent = opacity < 1;
+              cl.opacity = opacity;
+              return cl;
+            });
+          } else {
+            const cl = (mesh.material as THREE.Material).clone();
+            if (wireframe && "wireframe" in cl) {
+              (cl as THREE.MeshStandardMaterial).wireframe = true;
+              (cl as THREE.MeshStandardMaterial).color = new THREE.Color(color);
+            }
+            cl.transparent = opacity < 1;
+            cl.opacity = opacity;
+            mesh.material = cl;
+          }
+        }
+      }
+    });
+
+    const wrapper = new THREE.Group();
+    wrapper.add(clone);
+    return wrapper;
+  }, [scene, color, wireframe, opacity]);
+
+  return <primitive object={cloned} scale={scale} />;
+}
+
+// Debris Geometries: Realistic 3D Rocket Parts, Meteorites, and Solar Arrays
 function DebrisShape({
   material,
   color,
-  wireframe,
-  opacity,
-  scale
+  wireframe = false,
+  opacity = 1,
+  scale = 1
 }: {
   material?: string;
   color: string;
-  wireframe: boolean;
-  opacity: number;
-  scale: number;
+  wireframe?: boolean;
+  opacity?: number;
+  scale?: number;
 }) {
   const mat = (material || "").toLowerCase();
 
@@ -272,79 +403,74 @@ function DebrisShape({
         {/* Central Satellite Body */}
         <mesh>
           <boxGeometry args={[0.7, 0.7, 0.7]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+          <meshStandardMaterial
+            color={wireframe ? color : "#334155"}
+            metalness={0.75}
+            roughness={0.25}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
         </mesh>
         {/* Left Solar Panel */}
         <mesh position={[-1.15, 0, 0]}>
           <boxGeometry args={[1.3, 0.55, 0.05]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+          <meshStandardMaterial
+            color={wireframe ? color : "#1e3a8a"}
+            metalness={0.85}
+            roughness={0.2}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
         </mesh>
         {/* Right Solar Panel */}
         <mesh position={[1.15, 0, 0]}>
           <boxGeometry args={[1.3, 0.55, 0.05]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
+          <meshStandardMaterial
+            color={wireframe ? color : "#1e3a8a"}
+            metalness={0.85}
+            roughness={0.2}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
         </mesh>
         {/* High-gain Antenna Rod */}
         <mesh position={[0, 0.55, 0]}>
           <cylinderGeometry args={[0.03, 0.03, 0.45, 6]} />
-          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
+          <meshStandardMaterial
+            color={wireframe ? color : "#cbd5e1"}
+            metalness={0.9}
+            roughness={0.1}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
         </mesh>
       </group>
     );
   }
 
-  // 2. Spent Rocket Stage / Reaction Wheel / Engine
-  if (mat.includes("wheel") || mat.includes("fairing") || mat.includes("reaction")) {
+  // 2. Spent Rocket Stage / Booster / Reaction Wheel / Fairing -> 3D Rocket GLB Model
+  if (
+    mat.includes("wheel") ||
+    mat.includes("fairing") ||
+    mat.includes("reaction") ||
+    mat.includes("rocket") ||
+    mat.includes("booster") ||
+    mat.includes("engine")
+  ) {
     return (
-      <group scale={scale}>
-        {/* Cylindrical Booster Body */}
-        <mesh rotation={[Math.PI / 4, 0, 0]}>
-          <cylinderGeometry args={[0.38, 0.45, 1.4, 10]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
-        </mesh>
-        {/* Rocket Nozzle / Engine Bell */}
-        <mesh position={[0, -0.85, 0]} rotation={[Math.PI / 4, 0, 0]}>
-          <coneGeometry args={[0.48, 0.5, 10]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
-        </mesh>
-        {/* Interstage Ring */}
-        <mesh position={[0, 0.35, 0]} rotation={[Math.PI / 4, 0, 0]}>
-          <torusGeometry args={[0.42, 0.05, 8, 16]} />
-          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
-        </mesh>
+      <group scale={scale * 2.2}>
+        <RocketStageModel color={color} wireframe={wireframe} opacity={opacity} />
       </group>
     );
   }
 
-  // 3. Structural Strut / Shard
-  if (mat.includes("strut") || mat.includes("shielding")) {
-    return (
-      <group scale={scale}>
-        {/* Angular Shard Plate */}
-        <mesh rotation={[0.4, 0.5, 0.2]}>
-          <octahedronGeometry args={[0.85, 0]} />
-          <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
-        </mesh>
-        {/* Broken Truss Rod */}
-        <mesh rotation={[0.6, -0.3, 0.8]}>
-          <cylinderGeometry args={[0.05, 0.05, 1.6, 6]} />
-          <meshBasicMaterial color={color} transparent opacity={opacity} toneMapped={false} />
-        </mesh>
-      </group>
-    );
-  }
-
-  // 4. Randomized Space Rock / Asteroid Fragment
+  // 3. Meteorite / Asteroid / Cosmic Shard / Shielding / Strut -> 3D Meteorite GLB Model
   return (
-    <group scale={scale}>
-      <mesh>
-        <dodecahedronGeometry args={[0.8, 1]} />
-        <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
-      </mesh>
-      <mesh scale={0.55} position={[0.35, 0.3, -0.25]}>
-        <tetrahedronGeometry args={[0.7, 0]} />
-        <meshBasicMaterial color={color} wireframe={wireframe} transparent opacity={opacity} toneMapped={false} />
-      </mesh>
+    <group scale={scale * 2.2}>
+      <MeteoriteModel color={color} wireframe={wireframe} opacity={opacity} />
     </group>
   );
 }
@@ -450,6 +576,16 @@ function DebrisMesh({
     }
   });
 
+  // When recovered or actively carried in drone claws during capture/return, hide independent orbit mesh
+  if (
+    debris.status === "recovered" ||
+    (debris.status === "captured" &&
+      assignedDrone &&
+      (assignedDrone.status === "returning" || assignedDrone.status === "capturing"))
+  ) {
+    return null;
+  }
+
   return (
     <group
       ref={groupRef}
@@ -466,13 +602,13 @@ function DebrisMesh({
         document.body.style.cursor = "default";
       }}
     >
-      {/* Visual Procedural Mesh Group */}
+      {/* Visual Procedural / GLB Mesh Group */}
       <group ref={visualRef}>
         <DebrisShape
           material={debris.material}
           color={color}
-          wireframe={debris.status === "available" || debris.status === "targeted"}
-          opacity={debris.status === "recovered" ? 0.45 : 0.95}
+          wireframe={debris.status === "targeted"}
+          opacity={0.98}
           scale={baseScale}
         />
       </group>
@@ -600,7 +736,10 @@ function OrbitalScene() {
     <>
       <color attach="background" args={["#010204"]} />
       <fog attach="fog" args={["#010204", 10, 25]} />
-      <ambientLight intensity={0.35} />
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[8, 10, 6]} intensity={2.2} />
+      <directionalLight position={[-8, -5, -6]} intensity={0.7} />
+      <pointLight position={[0, 0, 0]} intensity={1.2} distance={8} color="#00ffff" />
       <Stars radius={50} depth={25} count={2500} factor={2.2} saturation={0.2} fade speed={0.4} />
 
       {/* Earth Centerpiece */}
@@ -680,3 +819,4 @@ export default function Scene() {
 }
 
 useGLTF.preload("/scale-extraction-drone.glb");
+useGLTF.preload("/scale-extraction-drone-debry.glb");

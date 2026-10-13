@@ -91,21 +91,23 @@ export function getTimeString(): string {
 }
 
 const debrisMaterials = [
-  "Titanium Shielding",
-  "Aluminium Fairing",
+  "Spent Rocket Booster Stage",
+  "Chondrite Meteorite Fragment",
+  "Aluminium Fairing & Thrust Ring",
+  "Ferrous Meteorite Shard",
   "Defunct Solar Array",
+  "Reaction Wheel Core",
   "Nickel-Cadmium Battery Unit",
-  "Carbon-Composite Strut",
-  "Reaction Wheel Core"
+  "Titanium Shielding Shard"
 ];
 
 const initialDebris: Debris[] = [
   {
     id: "DEB-001",
     position: [2.5, 0.4, 1.2],
-    mass: 120,
-    value: 2400000,
-    material: "Titanium Shielding",
+    mass: 380,
+    value: 4800000,
+    material: "Spent Rocket Booster Stage",
     status: "available",
     assignedDroneId: null
   },
@@ -121,9 +123,9 @@ const initialDebris: Debris[] = [
   {
     id: "DEB-003",
     position: [1.2, -1.8, 1.9],
-    mass: 95,
-    value: 1900000,
-    material: "Carbon-Composite Strut",
+    mass: 145,
+    value: 2900000,
+    material: "Chondrite Meteorite Fragment",
     status: "available",
     assignedDroneId: null
   },
@@ -141,16 +143,16 @@ const initialDebris: Debris[] = [
     position: [0.8, 2.3, -1.4],
     mass: 160,
     value: 2750000,
-    material: "Aluminium Fairing",
+    material: "Aluminium Fairing & Thrust Ring",
     status: "available",
     assignedDroneId: null
   },
   {
     id: "DEB-006",
     position: [2.7, -0.6, -1.1],
-    mass: 85,
-    value: 1450000,
-    material: "Titanium Shielding",
+    mass: 95,
+    value: 1850000,
+    material: "Ferrous Meteorite Shard",
     status: "available",
     assignedDroneId: null
   },
