@@ -152,6 +152,34 @@ export default function MissionControl() {
     window.dispatchEvent(new CustomEvent("scale:zoom", { detail: direction }));
   };
 
+  // Keyboard Quick-Launch Hotkeys: Space to FETCH selected, A to AUTO DISPATCH
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (e.code === "Space") {
+        if (selected && selected.status === "available" && idleDroneCount > 0) {
+          e.preventDefault();
+          goFetch(selected.id);
+        }
+      } else if (e.key === "a" || e.key === "A") {
+        if (availableDebrisCount > 0 && idleDroneCount > 0) {
+          e.preventDefault();
+          autoDispatch();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selected, idleDroneCount, availableDebrisCount, goFetch, autoDispatch]);
+
   // Tsiolkovsky mass-dependent fuel calculation
   const estimatedRecoveryFuel = useMemo(() => {
     if (!selected) return 0;
@@ -222,11 +250,19 @@ export default function MissionControl() {
           <div className="manifest-list">
             {debris.map((item) => {
               const isSelected = item.id === selected?.id;
+              const assignedTo = drones.find((d) => d.targetId === item.id);
               return (
-                <button
+                <div
                   key={item.id}
+                  role="button"
+                  tabIndex={0}
                   className={`manifest-row ${isSelected ? "is-selected" : ""}`}
                   onClick={() => selectDebris(item.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      selectDebris(item.id);
+                    }
+                  }}
                 >
                   <span className="row-index">{item.id}</span>
                   <div className="row-copy">
@@ -235,10 +271,29 @@ export default function MissionControl() {
                       {item.mass} kg · {formatLogValue(item.value)}
                     </small>
                   </div>
-                  <span className={`status-chip ${debrisStatusTone[item.status]}`}>
-                    {item.status}
-                  </span>
-                </button>
+                  {item.status === "available" ? (
+                    <button
+                      type="button"
+                      className="row-quick-fetch-btn"
+                      title={`Dispatch drone to capture ${item.id}`}
+                      disabled={idleDroneCount === 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selectDebris(item.id);
+                        goFetch(item.id);
+                      }}
+                    >
+                      ▶ FETCH
+                    </button>
+                  ) : (
+                    <span
+                      className={`status-chip ${debrisStatusTone[item.status]}`}
+                      title={assignedTo ? `Assigned to ${assignedTo.id}` : item.status}
+                    >
+                      {assignedTo ? assignedTo.id : item.status}
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -392,16 +447,29 @@ export default function MissionControl() {
                 {isFocusCardMinimized ? (
                   <div className="minimized-pill-row">
                     <div className="minimized-title">
-                      <strong>PROJECT S.C.A.L.E. DEPOT-01</strong>
-                      <span className="text-[10px] text-slate-400 font-mono">420KM LEO · ISRU SMELTER ACTIVE</span>
+                      <div className="flex items-center gap-2">
+                        <strong>PROJECT S.C.A.L.E. DEPOT-01</strong>
+                        <span className="text-[9px] text-emerald-400 font-mono font-bold">ISRU ACTIVE</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {totalRecoveredMass} kg STORED · {formatMoney(totalRecoveredValue)} YIELD
+                      </span>
                     </div>
-                    <div className="minimized-metrics">
-                      <span className="text-emerald-400 font-mono text-xs font-bold">{totalRecoveredMass} kg</span>
-                      <span className="text-amber font-mono text-xs font-bold">{formatMoney(totalRecoveredValue)}</span>
+                    <div className="minimized-actions">
+                      <button
+                        type="button"
+                        className="minimized-auto-btn"
+                        disabled={availableDebrisCount === 0 || idleDroneCount === 0}
+                        onClick={autoDispatch}
+                        title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching (Hotkey: A)`}
+                      >
+                        ⚡ AUTO ({idleDroneCount})
+                      </button>
                       <button
                         type="button"
                         className="minimized-expand-btn"
                         onClick={() => setIsFocusCardMinimized(false)}
+                        title="Expand depot telemetry"
                       >
                         EXPAND ↗
                       </button>
@@ -529,25 +597,54 @@ export default function MissionControl() {
                 {isFocusCardMinimized ? (
                   <div className="minimized-pill-row">
                     <div className="minimized-title">
-                      <strong>{selected.id}</strong>
+                      <div className="flex items-center gap-2">
+                        <strong>{selected.id}</strong>
+                        {selected.threatIndex !== undefined && (
+                          <span
+                            className={`text-[9px] font-mono px-1 py-0.5 border ${
+                              selected.threatIndex > 50
+                                ? "text-amber border-amber/40 bg-amber/10"
+                                : "text-emerald-400 border-emerald-500/40 bg-emerald-950/20"
+                            }`}
+                          >
+                            THREAT: {selected.threatIndex}/100
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-slate-400 font-mono">
                         {selected.mass} kg · {formatMoney(selected.value)} · {selected.material}
                       </span>
                     </div>
                     <div className="minimized-actions">
-                      {selected.status === "available" && (
+                      {selected.status === "available" ? (
                         <button
                           type="button"
                           className="minimized-fetch-btn"
+                          disabled={idleDroneCount === 0}
                           onClick={() => goFetch(selected.id)}
+                          title={`Launch closest drone to intercept ${selected.id} (Hotkey: SPACE)`}
                         >
                           GO FETCH ▶
                         </button>
+                      ) : (
+                        <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
+                          {selected.status}
+                        </span>
                       )}
+                      <button
+                        type="button"
+                        className="minimized-auto-btn"
+                        disabled={availableDebrisCount === 0 || idleDroneCount === 0}
+                        onClick={autoDispatch}
+                        title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching (Hotkey: A)`}
+                      >
+                        ⚡ AUTO ({idleDroneCount})
+                      </button>
                       <button
                         type="button"
                         className="minimized-expand-btn"
                         onClick={() => setIsFocusCardMinimized(false)}
+                        title="Expand telemetry details"
                       >
                         EXPAND ↗
                       </button>

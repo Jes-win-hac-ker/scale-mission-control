@@ -117,6 +117,34 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   white-space: nowrap;
 }
 
+.row-quick-fetch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(255, 191, 0, 0.15);
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font: 700 9px "JetBrains Mono", monospace;
+  letter-spacing: .05em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.row-quick-fetch-btn:hover:not(:disabled) {
+  background: var(--amber);
+  color: var(--void);
+  box-shadow: 0 0 12px rgba(255, 191, 0, 0.5);
+  transform: translateY(-1px);
+}
+.row-quick-fetch-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+}
+
 /* Recovery Depot status footer in manifest */
 .depot-footer {
   padding: 12px 14px;
@@ -199,7 +227,7 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   align-self: flex-start;
   margin-top: auto;
   margin-left: 0;
-  width: min(390px, 100%);
+  width: min(450px, 100%);
   padding: 14px 16px;
   border: 1px solid rgba(255,191,0,.45);
   background: rgba(5,5,5,.85);
@@ -241,15 +269,18 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .minimized-title strong {
-  font: 600 17px "JetBrains Mono", monospace;
+  font: 600 16px "JetBrains Mono", monospace;
   color: #fff;
+  white-space: nowrap;
 }
 .minimized-metrics, .minimized-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 .minimized-fetch-btn {
   padding: 5px 12px;
@@ -259,11 +290,40 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   letter-spacing: .04em;
   border: none;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.2s ease;
 }
-.minimized-fetch-btn:hover {
+.minimized-fetch-btn:hover:not(:disabled) {
   box-shadow: 0 0 14px rgba(255, 191, 0, 0.6);
   transform: translateY(-1px);
+}
+.minimized-fetch-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+.minimized-auto-btn {
+  padding: 5px 10px;
+  background: rgba(0, 255, 255, 0.12);
+  color: var(--cyan);
+  border: 1px solid rgba(0, 255, 255, 0.4);
+  font: 700 9px "JetBrains Mono", monospace;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.minimized-auto-btn:hover:not(:disabled) {
+  background: var(--cyan);
+  color: var(--void);
+  box-shadow: 0 0 14px rgba(0, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+.minimized-auto-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--muted);
 }
 .minimized-expand-btn {
   padding: 5px 10px;
@@ -272,6 +332,7 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   border: 1px solid rgba(0, 255, 255, 0.3);
   font: 600 9px "JetBrains Mono", monospace;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.2s ease;
 }
 .minimized-expand-btn:hover {
