@@ -178,6 +178,143 @@ export function getStationRingAngle(timeSec: number): number {
   return timeSec * STATION_RING_ROTATION_SPEED;
 }
 
+export interface StationOrbitalBasis {
+  radius: number;
+  u: [number, number, number];
+  v: [number, number, number];
+  normal: [number, number, number];
+  omega: number;
+}
+
+// Generates deterministic Keplerian orbital plane and angular rate for the Recovery Depot (DEPOT-01)
+// Starting position: [0.0, 1.9, 1.8] (~2.617 radius, LEO/MEO inclined orbit)
+export function getStationOrbitalBasis(depot?: { position?: [number, number, number] }): StationOrbitalBasis {
+  const p0 = new THREE.Vector3(...(depot?.position || [0.0, 1.9, 1.8]));
+  const radius = p0.length();
+  const u = p0.clone().normalize();
+
+  // Distinct inclined orbit normal (inclination ~48°, stable prograde recovery corridor)
+  const ref = new THREE.Vector3(0.88, 0.35, -0.32).normalize();
+  let v = new THREE.Vector3().crossVectors(ref, u);
+  if (v.lengthSq() < 0.01) {
+    v = new THREE.Vector3().crossVectors(new THREE.Vector3(1, 0, 0), u);
+  }
+  v.normalize();
+  const normal = new THREE.Vector3().crossVectors(u, v).normalize();
+
+  // Angular rate ~0.052 rad/s (graceful full orbit every ~120s)
+  const omega = 0.052;
+
+  return {
+    radius,
+    u: [u.x, u.y, u.z],
+    v: [v.x, v.y, v.z],
+    normal: [normal.x, normal.y, normal.z],
+    omega
+  };
+}
+
+// Computes current 3D position [x, y, z] of DEPOT-01 docking station at any given time (seconds)
+export function getStationOrbitalPosition(
+  timeSec: number,
+  depot?: { position?: [number, number, number] }
+): [number, number, number] {
+  const { radius, u, v, omega } = getStationOrbitalBasis(depot);
+  const theta = omega * timeSec;
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+
+  return [
+    (u[0] * cosT + v[0] * sinT) * radius,
+    (u[1] * cosT + v[1] * sinT) * radius,
+    (u[2] * cosT + v[2] * sinT) * radius
+  ];
+}
+
+export function getDepotOrbitalPosition(
+  depot: { position?: [number, number, number] } | undefined,
+  timeSec: number
+): [number, number, number] {
+  return getStationOrbitalPosition(timeSec, depot);
+}
+
+// Full orbital attitude, quaternion, and transform matrix for DEPOT-01
+// - Nadir (local -Y) faces Earth center (downlink & smelting vortex point toward Earth)
+// - Zenith (local +Y) faces deep space (comm mast & staging gantry face zenith)
+// - Prograde (local +Z) aligns with orbital flight velocity
+// - Orbit Normal (local +X) aligns with solar panel boom
+export function getStationTransform(
+  timeSec: number,
+  depot?: { position?: [number, number, number] }
+): {
+  position: [number, number, number];
+  quaternion: THREE.Quaternion;
+  rotationMatrix: THREE.Matrix4;
+  nadir: [number, number, number];
+  zenith: [number, number, number];
+  prograde: [number, number, number];
+} {
+  const { radius, u, v, omega } = getStationOrbitalBasis(depot);
+  const theta = omega * timeSec;
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+
+  const uVec = new THREE.Vector3(...u);
+  const vVec = new THREE.Vector3(...v);
+
+  const pos = new THREE.Vector3()
+    .addScaledVector(uVec, cosT)
+    .addScaledVector(vVec, sinT)
+    .multiplyScalar(radius);
+
+  // Local +Y = Zenith (radial outward from Earth)
+  const yLocal = pos.clone().normalize();
+  const nadir = yLocal.clone().negate();
+
+  // Local +Z = Prograde velocity tangent: d/dt(pos)
+  const zLocal = new THREE.Vector3()
+    .addScaledVector(uVec, -sinT)
+    .addScaledVector(vVec, cosT)
+    .normalize();
+
+  // Local +X = Orbit normal via right-hand rule (yLocal cross zLocal)
+  const xLocal = new THREE.Vector3().crossVectors(yLocal, zLocal).normalize();
+
+  const rotMatrix = new THREE.Matrix4().makeBasis(xLocal, yLocal, zLocal);
+  const quat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+
+  return {
+    position: [pos.x, pos.y, pos.z],
+    quaternion: quat,
+    rotationMatrix: rotMatrix,
+    nadir: [nadir.x, nadir.y, nadir.z],
+    zenith: [yLocal.x, yLocal.y, yLocal.z],
+    prograde: [zLocal.x, zLocal.y, zLocal.z]
+  };
+}
+
+// Generates circular orbital trace ring samples for DEPOT-01 trajectory visualization
+export function getStationOrbitTrackSamples(
+  segments = 96,
+  depot?: { position?: [number, number, number] }
+): [number, number, number][] {
+  const { radius, u, v } = getStationOrbitalBasis(depot);
+  const samples: [number, number, number][] = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * Math.PI * 2;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    samples.push([
+      (u[0] * cosT + v[0] * sinT) * radius,
+      (u[1] * cosT + v[1] * sinT) * radius,
+      (u[2] * cosT + v[2] * sinT) * radius
+    ]);
+  }
+
+  return samples;
+}
+
 // Mooring Berth IDs and Spatial Config for DEPOT-01 Ring & Staging
 export type DroneBerthId = "B1" | "B2" | "B3" | "B4" | "STAGING";
 
@@ -196,18 +333,48 @@ export const BERTH_CONFIGS: Record<DroneBerthId, BerthConfig> = {
   STAGING: { id: "STAGING", label: "Orbital Reserve Staging Gantry", localPos: [0, 0.55, 0], outwardAngle: 0 }
 };
 
-// Computes real-time 3D world coordinate of a station mooring berth taking into account ring rotation
+// Computes real-time 3D world coordinate of a station mooring berth taking into account ring rotation & station orbit
 export function getBerthWorldPosition(
   berthId: DroneBerthId,
-  depotPos: [number, number, number],
-  ringRotationY: number
+  depotPosOrTimeSec: [number, number, number] | number,
+  ringRotationY?: number
 ): [number, number, number] {
   const cfg = BERTH_CONFIGS[berthId];
+
+  if (typeof depotPosOrTimeSec === "number") {
+    const timeSec = depotPosOrTimeSec;
+    const { position, rotationMatrix } = getStationTransform(timeSec);
+    const rotRing = getStationRingAngle(timeSec);
+
+    let localVec: THREE.Vector3;
+    if (berthId === "STAGING") {
+      localVec = new THREE.Vector3(...cfg.localPos);
+    } else {
+      const cos = Math.cos(rotRing);
+      const sin = Math.sin(rotRing);
+      const lx = cfg.localPos[0];
+      const lz = cfg.localPos[2];
+      const rx = lx * cos + lz * sin;
+      const rz = -lx * sin + lz * cos;
+      localVec = new THREE.Vector3(rx, cfg.localPos[1], rz);
+    }
+
+    localVec.applyMatrix4(rotationMatrix);
+    return [
+      position[0] + localVec.x,
+      position[1] + localVec.y,
+      position[2] + localVec.z
+    ];
+  }
+
+  // Fallback for static depot position input:
+  const depotPos = depotPosOrTimeSec;
   if (berthId === "STAGING") {
     return [depotPos[0] + cfg.localPos[0], depotPos[1] + cfg.localPos[1], depotPos[2] + cfg.localPos[2]];
   }
-  const cos = Math.cos(ringRotationY);
-  const sin = Math.sin(ringRotationY);
+  const rot = ringRotationY ?? 0;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
   const lx = cfg.localPos[0];
   const lz = cfg.localPos[2];
   const rx = lx * cos + lz * sin;
@@ -218,9 +385,14 @@ export function getBerthWorldPosition(
 // Computes outward orientation vector from depot center to berth for docking alignment
 export function getBerthOutwardNormal(
   berthId: DroneBerthId,
-  ringRotationY: number
+  ringRotationY: number,
+  stationQuat?: THREE.Quaternion
 ): [number, number, number] {
   if (berthId === "STAGING") {
+    if (stationQuat) {
+      const v = new THREE.Vector3(0, 1, 0).applyQuaternion(stationQuat);
+      return [v.x, v.y, v.z];
+    }
     return [0, 1, 0];
   }
   const cos = Math.cos(ringRotationY);
@@ -231,21 +403,35 @@ export function getBerthOutwardNormal(
   const rx = lx * cos + lz * sin;
   const rz = -lx * sin + lz * cos;
   const len = Math.sqrt(rx * rx + rz * rz) || 1;
-  return [rx / len, 0, rz / len];
+  const localVec = new THREE.Vector3(rx / len, 0, rz / len);
+  if (stationQuat) {
+    localVec.applyQuaternion(stationQuat);
+  }
+  return [localVec.x, localVec.y, localVec.z];
 }
 
 // Underside ISRU Smelting Vortex core intake coordinate
 export function getSmeltingIntakePosition(
-  depotPos: [number, number, number]
+  depotPosOrTimeSec: [number, number, number] | number
 ): [number, number, number] {
-  return [depotPos[0], depotPos[1] - 0.48, depotPos[2]];
+  if (typeof depotPosOrTimeSec === "number") {
+    const { position, rotationMatrix } = getStationTransform(depotPosOrTimeSec);
+    const localVec = new THREE.Vector3(0, -0.48, 0).applyMatrix4(rotationMatrix);
+    return [position[0] + localVec.x, position[1] + localVec.y, position[2] + localVec.z];
+  }
+  return [depotPosOrTimeSec[0], depotPosOrTimeSec[1] - 0.48, depotPosOrTimeSec[2]];
 }
 
 // Underside stand-off hover coordinate where returning drones hold while releasing payload
 export function getSmeltingStandOffPosition(
-  depotPos: [number, number, number]
+  depotPosOrTimeSec: [number, number, number] | number
 ): [number, number, number] {
-  return [depotPos[0], depotPos[1] - 0.70, depotPos[2]];
+  if (typeof depotPosOrTimeSec === "number") {
+    const { position, rotationMatrix } = getStationTransform(depotPosOrTimeSec);
+    const localVec = new THREE.Vector3(0, -0.70, 0).applyMatrix4(rotationMatrix);
+    return [position[0] + localVec.x, position[1] + localVec.y, position[2] + localVec.z];
+  }
+  return [depotPosOrTimeSec[0], depotPosOrTimeSec[1] - 0.70, depotPosOrTimeSec[2]];
 }
 
 function dist3(a: [number, number, number], b: [number, number, number]): number {
@@ -281,6 +467,41 @@ export function calculateRendezvousTrajectory(
   const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
 
   const finalPos = getDebrisOrbitalPosition(debris, startTimeSec + t2);
+  const finalDist = dist3(startPos, finalPos);
+
+  return {
+    durationSec: t2,
+    rendezvousPosition: finalPos,
+    distance: finalDist
+  };
+}
+
+// Predictive Keplerian Rendezvous Solver for Inbound Drone Return:
+// Solves for exact future coordinates where returning drone arc and orbiting station smelting standoff will meet
+export function calculateDepotRendezvousTrajectory(
+  startPos: [number, number, number],
+  depot: { position?: [number, number, number] } | undefined,
+  startTimeSec: number,
+  droneSpeed = 1.2
+): {
+  durationSec: number;
+  rendezvousPosition: [number, number, number];
+  distance: number;
+} {
+  const d0 = dist3(startPos, getSmeltingStandOffPosition(startTimeSec));
+  const t0 = Math.min(5.5, Math.max(1.8, d0 / droneSpeed));
+
+  // Iteration 1: refine target standoff based on t0
+  const pos1 = getSmeltingStandOffPosition(startTimeSec + t0);
+  const d1 = dist3(startPos, pos1);
+  const t1 = Math.min(5.5, Math.max(1.8, d1 / droneSpeed));
+
+  // Iteration 2: refine target standoff based on t1
+  const pos2 = getSmeltingStandOffPosition(startTimeSec + t1);
+  const d2 = dist3(startPos, pos2);
+  const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
+
+  const finalPos = getSmeltingStandOffPosition(startTimeSec + t2);
   const finalDist = dist3(startPos, finalPos);
 
   return {
@@ -375,7 +596,7 @@ export function easeInOutQuad(t: number): number {
 // Real-time flight position calculator for drones along curved transfer arcs and docked berths
 export function getDroneWorldPosition(
   drone: Drone,
-  depotPos: [number, number, number],
+  depotPosOrTimeSec: [number, number, number] | number,
   timeSec: number,
   debrisList?: Debris[]
 ): [number, number, number] {
@@ -383,7 +604,22 @@ export function getDroneWorldPosition(
     const elapsed = (timeSec * 1000 - drone.flight.startTime) / 1000;
     const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
     const eased = easeInOutQuad(progress);
-    return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+    const arcPos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+
+    // If returning to the orbiting station: blend with live moving station standoff coordinate
+    if (drone.status === "returning") {
+      const liveStandOff = getSmeltingStandOffPosition(timeSec);
+      const targetPos = drone.flight.targetPosition;
+      // Quadratic terminal homing blend: 0 at launch, 1.0 at arrival
+      const blend = progress * progress;
+      return [
+        arcPos[0] + (liveStandOff[0] - targetPos[0]) * blend,
+        arcPos[1] + (liveStandOff[1] - targetPos[1]) * blend,
+        arcPos[2] + (liveStandOff[2] - targetPos[2]) * blend
+      ];
+    }
+
+    return arcPos;
   }
   if (drone.status === "capturing" && drone.targetId) {
     const target = debrisList?.find((d) => d.id === drone.targetId);
@@ -392,11 +628,13 @@ export function getDroneWorldPosition(
     }
   }
   if (drone.subStatus === "ingesting") {
-    return getSmeltingStandOffPosition(depotPos);
+    return getSmeltingStandOffPosition(timeSec);
+  }
+  if (drone.subStatus === "docking") {
+    return getBerthWorldPosition(drone.berthId, timeSec);
   }
   if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
-    const ringAngle = getStationRingAngle(timeSec);
-    return getBerthWorldPosition(drone.berthId, depotPos, ringAngle);
+    return getBerthWorldPosition(drone.berthId, timeSec);
   }
   return drone.position;
 }

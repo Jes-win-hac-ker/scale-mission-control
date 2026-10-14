@@ -17,6 +17,7 @@ import {
   getBerthWorldPosition,
   getDebrisOrbitalPosition,
   getDebrisOrbitTrackSamples,
+  getDepotOrbitalPosition,
   getDifferentialVectorState,
   getDroneWorldPosition,
   getOrbitalArcPoint,
@@ -24,7 +25,10 @@ import {
   getOrbitalArcTangent,
   getSmeltingIntakePosition,
   getSmeltingStandOffPosition,
+  getStationOrbitalPosition,
+  getStationOrbitTrackSamples,
   getStationRingAngle,
+  getStationTransform,
   STATION_RING_ROTATION_SPEED
 } from "@/lib/orbital";
 
@@ -66,6 +70,13 @@ function OrbitalRecoveryStation({
   const isStagingIncoming = drone05 && (drone05.status === "returning" || drone05.subStatus === "docking");
 
   useFrame(({ clock }, delta) => {
+    // 0. Full Keplerian orbital transit and nadir-pointing attitude alignment
+    const transform = getStationTransform(clock.elapsedTime, depot);
+    if (stationGroupRef.current) {
+      stationGroupRef.current.position.set(...transform.position);
+      stationGroupRef.current.quaternion.copy(transform.quaternion);
+    }
+
     // 1. Mathematically synchronized centrifugal spin of habitat ring and berths
     if (ringRef.current) {
       ringRef.current.rotation.y = getStationRingAngle(clock.elapsedTime);
@@ -183,9 +194,9 @@ function OrbitalRecoveryStation({
         <pointLight color="#00FFCC" intensity={1.8} distance={2.5} />
       </group>
 
-      {/* Microwave Carrier Downlink to Earth (Telecommunications Beam) */}
-      <mesh position={[0, -0.9, -0.85]} rotation={[0.76, 0, 0]}>
-        <cylinderGeometry args={[0.002, 0.002, 2.3, 6]} />
+      {/* Microwave Carrier Downlink to Earth (Telecommunications Beam locked to Nadir) */}
+      <mesh position={[0, -0.65, 0]}>
+        <cylinderGeometry args={[0.002, 0.002, 1.28, 6]} />
         <meshBasicMaterial
           color="#00FFFF"
           transparent
@@ -589,7 +600,19 @@ function DroneMesh({
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
 
-      const pos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+      let pos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+
+      // Terminal homing guidance: as returning drone approaches orbital depot, blend seamlessly into moving standoff
+      if (drone.status === "returning") {
+        const liveStandOff = getSmeltingStandOffPosition(clock.elapsedTime);
+        const blend = progress * progress;
+        pos = [
+          pos[0] + (liveStandOff[0] - drone.flight.targetPosition[0]) * blend,
+          pos[1] + (liveStandOff[1] - drone.flight.targetPosition[1]) * blend,
+          pos[2] + (liveStandOff[2] - drone.flight.targetPosition[2]) * blend
+        ];
+      }
+
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
 
       // Dynamic Flight Regimes:
@@ -666,22 +689,23 @@ function DroneMesh({
         groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
       }
     } else if (drone.subStatus === "ingesting") {
-      // 3. Underside Refinery Ingestion Stand-off: holding below station intake
-      const standOff = getSmeltingStandOffPosition(depot.position);
+      // 3. Underside Refinery Ingestion Stand-off: holding below moving station intake
+      const standOff = getSmeltingStandOffPosition(clock.elapsedTime);
       groupRef.current.position.set(standOff[0], standOff[1], standOff[2]);
       if (modelRef.current) {
         // Face upwards toward the smelting reactor funnel
-        const intake = getSmeltingIntakePosition(depot.position);
+        const intake = getSmeltingIntakePosition(clock.elapsedTime);
         modelRef.current.lookAt(new THREE.Vector3(...intake));
       }
     } else if (drone.subStatus === "docking") {
-      // 4. Ascent from Refinery Stand-off to Assigned Berth
-      const ringAngle = getStationRingAngle(clock.elapsedTime);
-      const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
+      // 4. Ascent from Refinery Stand-off to Assigned Berth on moving station
+      const berthPos = getBerthWorldPosition(drone.berthId, clock.elapsedTime);
       groupRef.current.position.lerp(new THREE.Vector3(...berthPos), 0.08);
 
       if (modelRef.current) {
-        const normal = getBerthOutwardNormal(drone.berthId, ringAngle);
+        const stationTrans = getStationTransform(clock.elapsedTime);
+        const ringAngle = getStationRingAngle(clock.elapsedTime);
+        const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
         const lookTarget = new THREE.Vector3(
           berthPos[0] + normal[0],
           berthPos[1] + normal[1],
@@ -690,13 +714,14 @@ function DroneMesh({
         modelRef.current.lookAt(lookTarget);
       }
     } else {
-      // 5. Docked at Station Berths: Synchronize with station ring rotation
-      const ringAngle = getStationRingAngle(clock.elapsedTime);
-      const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
+      // 5. Docked at Station Berths: Synchronize with station orbital transit and ring rotation
+      const berthPos = getBerthWorldPosition(drone.berthId, clock.elapsedTime);
       groupRef.current.position.set(berthPos[0], berthPos[1], berthPos[2]);
 
       if (modelRef.current) {
-        const normal = getBerthOutwardNormal(drone.berthId, ringAngle);
+        const stationTrans = getStationTransform(clock.elapsedTime);
+        const ringAngle = getStationRingAngle(clock.elapsedTime);
+        const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
         const lookTarget = new THREE.Vector3(
           berthPos[0] + normal[0],
           berthPos[1] + normal[1],
@@ -1177,9 +1202,9 @@ function TacticalTargetReticle({
 
     // Live 3D Spatial Coordinates & Differential Deviation ("Where It Isn't")
     const livePos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
-    let observerPos = depot.position;
+    let observerPos = getStationOrbitalPosition(clock.elapsedTime, depot);
     if (assignedDrone) {
-      observerPos = getDroneWorldPosition(assignedDrone, depot.position, clock.elapsedTime, [debris]);
+      observerPos = getDroneWorldPosition(assignedDrone, observerPos, clock.elapsedTime, [debris]);
     }
     const diff = getDifferentialVectorState(livePos, observerPos);
 
@@ -1380,14 +1405,10 @@ function DebrisMesh({
     if (!groupRef.current) return;
 
     if (debris.subStatus === "ingesting") {
-      // 1. Smelting Vortex Ingestion: Debris floats upwards from stand-off into intake core
-      const intakePos = getSmeltingIntakePosition(depot.position);
-      const standOff = getSmeltingStandOffPosition(depot.position);
-
-      const curY = groupRef.current.position.y;
-      groupRef.current.position.x = standOff[0];
-      groupRef.current.position.z = standOff[2];
-      groupRef.current.position.y = THREE.MathUtils.lerp(curY, intakePos[1] + 0.12, 0.08);
+      // 1. Smelting Vortex Ingestion: Debris floats upwards from moving stand-off into intake core
+      const intakePos = getSmeltingIntakePosition(clock.elapsedTime);
+      const targetPos = new THREE.Vector3(...intakePos);
+      groupRef.current.position.lerp(targetPos, 0.08);
 
       if (visualRef.current) {
         visualRef.current.rotation.y += 0.22;
@@ -1400,18 +1421,11 @@ function DebrisMesh({
       assignedDrone.status === "returning"
     ) {
       // 2. Inbound flight following carrier drone
-      const elapsed = (Date.now() - assignedDrone.flight.startTime) / 1000;
-      const progress = Math.min(1, Math.max(0, elapsed / assignedDrone.flight.duration));
-      const eased = easeInOutQuad(progress);
-
-      const pos = getOrbitalArcPoint(
-        assignedDrone.flight.startPosition,
-        assignedDrone.flight.targetPosition,
-        eased
-      );
+      const pos = getDroneWorldPosition(assignedDrone, clock.elapsedTime, clock.elapsedTime, [debris]);
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
     } else if (debris.status === "recovered" || debris.subStatus === "smelted") {
-      groupRef.current.position.set(debris.position[0], debris.position[1], debris.position[2]);
+      const intake = getSmeltingIntakePosition(clock.elapsedTime);
+      groupRef.current.position.set(intake[0], intake[1], intake[2]);
     } else {
       // 3. Continuous Keplerian orbital motion around Earth
       const pos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
@@ -1792,7 +1806,7 @@ function InterceptGuidanceBeam({
 
   useFrame(({ clock }) => {
     // 1. Calculate live Drone position & Debris position
-    const dronePos = getDroneWorldPosition(drone, depot.position, clock.elapsedTime, [debris]);
+    const dronePos = getDroneWorldPosition(drone, clock.elapsedTime, clock.elapsedTime, [debris]);
     const debrisPos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
 
     // 3. Update dynamic laser line vertices
@@ -1896,6 +1910,36 @@ function DebrisOrbitRing({
   );
 }
 
+// Dedicated Orbital Track Ring for DEPOT-01 Space Docking Station
+function StationOrbitRing({
+  depot,
+  isFocused
+}: {
+  depot: RecoveryDepot;
+  isFocused: boolean;
+}) {
+  const points = useMemo(() => {
+    return getStationOrbitTrackSamples(96, depot);
+  }, [depot]);
+
+  const color = isFocused ? "#00FFCC" : "#00FFFF";
+  const lineWidth = isFocused ? 2.4 : 1.2;
+  const opacity = isFocused ? 0.85 : 0.35;
+
+  return (
+    <Line
+      points={points}
+      color={color}
+      lineWidth={lineWidth}
+      dashed
+      dashSize={0.08}
+      gapSize={0.05}
+      transparent
+      opacity={opacity}
+    />
+  );
+}
+
 function OrbitalScene() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const { debris, drones, depot, selectedDebrisId, selectDebris, focusedEntity, focusEntity } = useMissionStore();
@@ -1939,7 +1983,8 @@ function OrbitalScene() {
       const item = debris.find((d) => d.id === focusedEntity.id);
       if (item) {
         if (item.status === "recovered") {
-          targetVec.set(depot.position[0], depot.position[1], depot.position[2]);
+          const depotPos = getStationOrbitalPosition(clock.elapsedTime, depot);
+          targetVec.set(depotPos[0], depotPos[1], depotPos[2]);
           targetDistance = 1.35;
         } else {
           // If captured and returning with a carrier drone, follow the drone's active transit
@@ -1947,7 +1992,7 @@ function OrbitalScene() {
             (d) => d.targetId === item.id && (d.status === "returning" || d.status === "capturing")
           );
           if (carrierDrone) {
-            const pos = getDroneWorldPosition(carrierDrone, depot.position, clock.elapsedTime, debris);
+            const pos = getDroneWorldPosition(carrierDrone, clock.elapsedTime, clock.elapsedTime, debris);
             targetVec.set(pos[0], pos[1], pos[2]);
             targetDistance = 0.65;
           } else {
@@ -1961,12 +2006,13 @@ function OrbitalScene() {
     } else if (focusedEntity.type === "drone") {
       const drone = drones.find((d) => d.id === focusedEntity.id);
       if (drone) {
-        const pos = getDroneWorldPosition(drone, depot.position, clock.elapsedTime, debris);
+        const pos = getDroneWorldPosition(drone, clock.elapsedTime, clock.elapsedTime, debris);
         targetVec.set(pos[0], pos[1], pos[2]);
         targetDistance = 0.55;
       }
     } else if (focusedEntity.type === "depot") {
-      targetVec.set(depot.position[0], depot.position[1], depot.position[2]);
+      const depotPos = getStationOrbitalPosition(clock.elapsedTime, depot);
+      targetVec.set(depotPos[0], depotPos[1], depotPos[2]);
       targetDistance = 1.35;
     }
 
@@ -1989,8 +2035,8 @@ function OrbitalScene() {
         viewDir.set(0, 0.35, 1).normalize();
       }
 
-      // When focusing on orbital entities (debris or drone), smoothly blend towards an elevated outward vantage
-      if (focusedEntity.type === "debris" || focusedEntity.type === "drone") {
+      // When focusing on orbital entities (debris, drone, or orbiting depot), smoothly blend towards an elevated outward vantage
+      if (focusedEntity.type === "debris" || focusedEntity.type === "drone" || focusedEntity.type === "depot") {
         const outward = targetVec.clone().normalize();
         const preferredDir = outward.clone().add(new THREE.Vector3(0, 0.4, 0)).normalize();
         viewDir.lerp(preferredDir, 0.05).normalize();
@@ -2040,7 +2086,8 @@ function OrbitalScene() {
       {/* Earth Centerpiece */}
       <Earth />
 
-      {/* Recovery Depot Multi-Bay Orbital Hub */}
+      {/* Recovery Depot Multi-Bay Orbital Hub Track & Station */}
+      <StationOrbitRing depot={depot} isFocused={focusedEntity.type === "depot"} />
       <OrbitalRecoveryStation depot={depot} drones={drones} />
 
       {/* Keplerian Orbit Track Rings for Satellites & Space Debris */}

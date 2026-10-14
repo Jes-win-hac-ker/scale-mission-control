@@ -13,9 +13,12 @@ import {
 } from "@/lib/store";
 import { calculateFuelBurn } from "@/lib/algorithms";
 import {
+  getBerthWorldPosition,
+  getDebrisOrbitalPosition,
   getDebrisSpatialCoordinates,
   getDifferentialVectorState,
-  getDroneWorldPosition
+  getDroneWorldPosition,
+  getStationOrbitalPosition
 } from "@/lib/orbital";
 
 const debrisStatusTone: Record<DebrisStatus, string> = {
@@ -185,20 +188,6 @@ export default function MissionControl() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selected, idleDroneCount, availableDebrisCount, goFetch, autoDispatch]);
 
-  // Tsiolkovsky mass-dependent fuel calculation
-  const estimatedRecoveryFuel = useMemo(() => {
-    if (!selected) return 0;
-    const distToDepot = distance(selected.position, depot.position);
-    const idleDrones = drones.filter((d) => d.status === "idle");
-    if (idleDrones.length === 0) {
-      return calculateFuelBurn(1.5, distToDepot, selected.mass);
-    }
-    const minDroneDist = Math.min(
-      ...idleDrones.map((d) => distance(d.position, selected.position))
-    );
-    return calculateFuelBurn(minDroneDist, distToDepot, selected.mass);
-  }, [selected, depot.position, drones]);
-
   const [liveSec, setLiveSec] = useState(() => (Date.now() - missionStartedAt) / 1000);
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -206,6 +195,25 @@ export default function MissionControl() {
     }, 150);
     return () => window.clearInterval(timer);
   }, [missionStartedAt]);
+
+  const liveDepotPos = useMemo(() => {
+    return getStationOrbitalPosition(liveSec, depot);
+  }, [liveSec, depot]);
+
+  // Tsiolkovsky mass-dependent fuel calculation based on real-time orbital positions
+  const estimatedRecoveryFuel = useMemo(() => {
+    if (!selected) return 0;
+    const currentDebrisPos = getDebrisOrbitalPosition(selected, liveSec);
+    const distToDepot = distance(currentDebrisPos, liveDepotPos);
+    const idleDrones = drones.filter((d) => d.status === "idle");
+    if (idleDrones.length === 0) {
+      return calculateFuelBurn(1.5, distToDepot, selected.mass);
+    }
+    const minDroneDist = Math.min(
+      ...idleDrones.map((d) => distance(getBerthWorldPosition(d.berthId, liveSec), currentDebrisPos))
+    );
+    return calculateFuelBurn(minDroneDist, distToDepot, selected.mass);
+  }, [selected, liveDepotPos, drones, liveSec]);
 
   const assignedDrone = useMemo(() => {
     return drones.find(
@@ -220,12 +228,12 @@ export default function MissionControl() {
 
   const diffState = useMemo(() => {
     if (!selected || !targetCoords) return null;
-    let observerPos = depot.position;
+    let observerPos = liveDepotPos;
     if (assignedDrone) {
-      observerPos = getDroneWorldPosition(assignedDrone, depot.position, liveSec, debris);
+      observerPos = getDroneWorldPosition(assignedDrone, liveSec, liveSec, debris);
     }
     return getDifferentialVectorState(targetCoords.scenePos, observerPos);
-  }, [selected, targetCoords, assignedDrone, depot.position, liveSec, debris]);
+  }, [selected, targetCoords, assignedDrone, liveDepotPos, liveSec, debris]);
 
   if (!mounted) {
     return null;
@@ -343,7 +351,7 @@ export default function MissionControl() {
               <span className="depot-status">ONLINE</span>
             </div>
             <div className="depot-data">
-              <span>POSITION: [0.0, 1.9, 1.8]</span>
+              <span>POS: [{liveDepotPos[0] > 0 ? "+" : ""}{liveDepotPos[0].toFixed(2)}, {liveDepotPos[1] > 0 ? "+" : ""}{liveDepotPos[1].toFixed(2)}, {liveDepotPos[2] > 0 ? "+" : ""}{liveDepotPos[2].toFixed(2)}]</span>
               <span>
                 SECURED: <b>{securedCount} OBJECTS</b>
               </span>
