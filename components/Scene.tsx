@@ -912,6 +912,7 @@ function OrbitalScene() {
 
   const prevEntityKeyRef = useRef<string>("earth");
   const isTransitioningRef = useRef<boolean>(false);
+  const lastTrackedPosRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
 
   useEffect(() => {
     const handleZoom = (event: Event) => {
@@ -934,7 +935,22 @@ function OrbitalScene() {
     return () => window.removeEventListener("scale:zoom", handleZoom);
   }, []);
 
-  // Frame-by-frame camera focus & tracking loop
+  // Real-time flight position calculator for drones
+  const getDroneRealtimePos = (drone: Drone): [number, number, number] => {
+    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
+      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+      const eased = easeInOutQuad(progress);
+      return [
+        THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
+        THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
+        THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
+      ];
+    }
+    return drone.position;
+  };
+
+  // Frame-by-frame camera focus & dynamic follow tracking loop
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -946,23 +962,28 @@ function OrbitalScene() {
     if (focusedEntity.type === "debris") {
       const item = debris.find((d) => d.id === focusedEntity.id);
       if (item) {
-        targetVec.set(item.position[0], item.position[1], item.position[2]);
-        targetDistance = 0.85;
+        if (item.status === "recovered") {
+          targetVec.set(depot.position[0], depot.position[1], depot.position[2]);
+          targetDistance = 1.35;
+        } else {
+          // If captured and returning with a carrier drone, follow the drone's active transit
+          const carrierDrone = drones.find(
+            (d) => d.targetId === item.id && (d.status === "returning" || d.status === "capturing")
+          );
+          if (carrierDrone) {
+            const pos = getDroneRealtimePos(carrierDrone);
+            targetVec.set(pos[0], pos[1], pos[2]);
+            targetDistance = 0.65;
+          } else {
+            targetVec.set(item.position[0], item.position[1], item.position[2]);
+            targetDistance = 0.85;
+          }
+        }
       }
     } else if (focusedEntity.type === "drone") {
       const drone = drones.find((d) => d.id === focusedEntity.id);
       if (drone) {
-        let pos = drone.position;
-        if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
-          const elapsed = (Date.now() - drone.flight.startTime) / 1000;
-          const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
-          const eased = easeInOutQuad(progress);
-          pos = [
-            THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
-            THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
-            THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
-          ];
-        }
+        const pos = getDroneRealtimePos(drone);
         targetVec.set(pos[0], pos[1], pos[2]);
         targetDistance = 0.55;
       }
@@ -976,13 +997,14 @@ function OrbitalScene() {
     if (prevEntityKeyRef.current !== currentKey) {
       prevEntityKeyRef.current = currentKey;
       isTransitioningRef.current = true;
+      lastTrackedPosRef.current.copy(targetVec);
     }
 
-    // Smoothly shift orbit pivot target
-    controls.target.lerp(targetVec, 0.08);
-
-    // During active transition, smoothly adjust distance along camera view line
     if (isTransitioningRef.current) {
+      // Smoothly transition orbit pivot target to the entity
+      controls.target.lerp(targetVec, 0.08);
+
+      // Smoothly adjust framing distance along camera view line
       const currentDist = camera.position.distanceTo(controls.target);
       const viewDir = camera.position.clone().sub(controls.target).normalize();
       if (viewDir.lengthSq() < 0.001) {
@@ -992,9 +1014,29 @@ function OrbitalScene() {
       const nextDist = THREE.MathUtils.lerp(currentDist, targetDistance, 0.08);
       camera.position.copy(controls.target).add(viewDir.multiplyScalar(nextDist));
 
-      if (Math.abs(currentDist - targetDistance) < 0.02 && controls.target.distanceTo(targetVec) < 0.02) {
+      // Transition completes when camera framing and target alignment are close
+      if (
+        Math.abs(currentDist - targetDistance) < 0.03 &&
+        controls.target.distanceTo(targetVec) < 0.03
+      ) {
         isTransitioningRef.current = false;
+        lastTrackedPosRef.current.copy(targetVec);
       }
+    } else {
+      // Continuous Follow Mode: translate both orbit target and camera by target's movement delta
+      const delta = targetVec.clone().sub(lastTrackedPosRef.current);
+      controls.target.add(delta);
+      camera.position.add(delta);
+
+      // Dampen any residual drift between controls.target and actual entity position
+      const drift = targetVec.clone().sub(controls.target);
+      if (drift.lengthSq() > 0.000001) {
+        const correction = drift.multiplyScalar(0.1);
+        controls.target.add(correction);
+        camera.position.add(correction);
+      }
+
+      lastTrackedPosRef.current.copy(targetVec);
     }
 
     controls.update();
