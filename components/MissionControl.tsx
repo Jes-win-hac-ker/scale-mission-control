@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Scene from "@/components/Scene";
 import {
   DebrisStatus,
+  Drone,
   DroneStatus,
   distance,
   formatLogValue,
@@ -28,6 +29,33 @@ const droneStatusTone: Record<DroneStatus, string> = {
   recovered: "text-emerald-400 border-emerald-400/50 bg-emerald-400/10",
   error: "text-crimson border-crimson/50 bg-crimson/10"
 };
+
+function getSubStatusLabel(drone: Drone): string {
+  if (drone.subStatus) {
+    switch (drone.subStatus) {
+      case "docked":
+        return "DOCKED";
+      case "undocking":
+        return "UNDOCK";
+      case "accelerating":
+        return "ACCEL";
+      case "coasting":
+        return "COAST";
+      case "braking":
+        return "BRAKE";
+      case "detumbling":
+        return "SYNCING";
+      case "clamping":
+        return "CLAMP";
+      case "towing":
+        return "TOWING";
+      case "docking":
+        return "DOCKING";
+    }
+  }
+  return drone.status.toUpperCase();
+}
+
 
 function formatMoney(value: number) {
   return `$${value.toLocaleString("en-US")}`;
@@ -493,21 +521,24 @@ export default function MissionControl() {
                       }`}
                     />
                     <strong className="drone-id">{drone.id}</strong>
+                    <span className="berth-badge font-mono text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 text-cyan border border-cyan/40 ml-2">
+                      {drone.berthId === "STAGING" ? "STAGING" : `BERTH ${drone.berthId}`}
+                    </span>
                   </div>
                   <span className={`status-chip ${droneStatusTone[drone.status]}`}>
-                    {drone.status}
+                    {getSubStatusLabel(drone)}
                   </span>
                 </div>
 
                 <div className="drone-data">
                   <span>
+                    BASE: <b>{drone.status === "idle" || drone.subStatus === "docked" ? `DEPOT-01 (${drone.berthId})` : "IN ORBIT"}</b>
+                  </span>
+                  <span>
                     TARGET: <b>{drone.targetId ?? "NONE"}</b>
                   </span>
                   <span>
-                    SPEED: <b>{drone.speed} u/s</b>
-                  </span>
-                  <span>
-                    PAYLOAD: <b>{drone.payload > 0 ? `${drone.payload} kg` : "0"}</b>
+                    PAYLOAD: <b>{drone.payload > 0 ? `${drone.payload} kg` : "0 kg"}</b>
                   </span>
                 </div>
 

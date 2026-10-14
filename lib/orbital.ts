@@ -170,3 +170,60 @@ export function getOrbitalArcSamples(
   }
   return samples;
 }
+
+// Mooring Berth IDs and Spatial Config for DEPOT-01 Ring & Staging
+export type DroneBerthId = "B1" | "B2" | "B3" | "B4" | "STAGING";
+
+export interface BerthConfig {
+  id: DroneBerthId;
+  label: string;
+  localPos: [number, number, number];
+  outwardAngle: number; // Base angle around Y axis
+}
+
+export const BERTH_CONFIGS: Record<DroneBerthId, BerthConfig> = {
+  B1: { id: "B1", label: "Mooring Berth B1 (Port)", localPos: [0.38, 0, 0], outwardAngle: 0 },
+  B2: { id: "B2", label: "Mooring Berth B2 (Starboard)", localPos: [-0.38, 0, 0], outwardAngle: Math.PI },
+  B3: { id: "B3", label: "Mooring Berth B3 (Forward)", localPos: [0, 0, 0.38], outwardAngle: Math.PI / 2 },
+  B4: { id: "B4", label: "Mooring Berth B4 (Aft)", localPos: [0, 0, -0.38], outwardAngle: -Math.PI / 2 },
+  STAGING: { id: "STAGING", label: "Orbital Reserve Staging", localPos: [0, 0.55, 0], outwardAngle: 0 }
+};
+
+// Computes real-time 3D world coordinate of a station mooring berth taking into account ring rotation
+export function getBerthWorldPosition(
+  berthId: DroneBerthId,
+  depotPos: [number, number, number],
+  ringRotationY: number
+): [number, number, number] {
+  const cfg = BERTH_CONFIGS[berthId];
+  if (berthId === "STAGING") {
+    return [depotPos[0] + cfg.localPos[0], depotPos[1] + cfg.localPos[1], depotPos[2] + cfg.localPos[2]];
+  }
+  const cos = Math.cos(ringRotationY);
+  const sin = Math.sin(ringRotationY);
+  const lx = cfg.localPos[0];
+  const lz = cfg.localPos[2];
+  const rx = lx * cos + lz * sin;
+  const rz = -lx * sin + lz * cos;
+  return [depotPos[0] + rx, depotPos[1] + cfg.localPos[1], depotPos[2] + rz];
+}
+
+// Computes outward orientation vector from depot center to berth for docking alignment
+export function getBerthOutwardNormal(
+  berthId: DroneBerthId,
+  ringRotationY: number
+): [number, number, number] {
+  if (berthId === "STAGING") {
+    return [0, 1, 0];
+  }
+  const cos = Math.cos(ringRotationY);
+  const sin = Math.sin(ringRotationY);
+  const cfg = BERTH_CONFIGS[berthId];
+  const lx = cfg.localPos[0];
+  const lz = cfg.localPos[2];
+  const rx = lx * cos + lz * sin;
+  const rz = -lx * sin + lz * cos;
+  const len = Math.sqrt(rx * rx + rz * rz) || 1;
+  return [rx / len, 0, rz / len];
+}
+

@@ -12,12 +12,16 @@ import {
   useMissionStore
 } from "@/lib/store";
 import {
+  DroneBerthId,
+  getBerthOutwardNormal,
+  getBerthWorldPosition,
   getDebrisOrbitalPosition,
   getDebrisOrbitTrackSamples,
   getOrbitalArcPoint,
   getOrbitalArcSamples,
   getOrbitalArcTangent
 } from "@/lib/orbital";
+
 
 // Smooth quadratic easing for fluid time-based movement
 function easeInOutQuad(t: number): number {
@@ -286,12 +290,14 @@ function OrbitalRecoveryStation({
   );
 }
 
-// 3D GLB Model Instance for Swarm Drones
+// 3D GLB Model Instance for Swarm Drones with Articulated Mechanisms
 function DroneGLBModel({
   status,
+  subStatus,
   color
 }: {
   status: Drone["status"];
+  subStatus?: Drone["subStatus"];
   color: string;
 }) {
   const { scene } = useGLTF("/scale-extraction-drone.glb");
@@ -315,6 +321,23 @@ function DroneGLBModel({
     return clone;
   }, [scene]);
 
+  // Articulate forward capture mechanism when clamping, detumbling, or towing
+  useEffect(() => {
+    const captureNode = cloned.getObjectByName("CaptureMechanism");
+    if (captureNode) {
+      if (status === "capturing" && subStatus === "clamping") {
+        captureNode.position.set(0, 0, 0.038);
+        captureNode.scale.set(1.08, 1.08, 1.15);
+      } else if (status === "returning" || subStatus === "towing") {
+        captureNode.position.set(0, 0, 0.024);
+        captureNode.scale.set(1.04, 1.04, 1.08);
+      } else {
+        captureNode.position.set(0, 0, 0);
+        captureNode.scale.set(1, 1, 1);
+      }
+    }
+  }, [cloned, status, subStatus]);
+
   return <primitive object={cloned} scale={0.065} />;
 }
 
@@ -328,8 +351,12 @@ function DroneMesh({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
+  const thrusterRef = useRef<THREE.Group>(null);
   const debrisList = useMissionStore((state) => state.debris);
+  const depot = useMissionStore((state) => state.depot);
   const focusEntity = useMissionStore((state) => state.focusEntity);
+
+  const [flightPhase, setFlightPhase] = useState<"accel" | "coast" | "brake">("accel");
 
   // Status-based color mapping per prompt requirements:
   // - Idle drones: cyan
@@ -364,10 +391,12 @@ function DroneMesh({
     return debrisList.find((d) => d.id === drone.targetId) || null;
   }, [drone.targetId, drone.status, debrisList]);
 
+  const isDocked = drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked";
+
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
 
-    // Time-based movement with easing along curved orbital transfer arc
+    // 1. In Flight along Curved Orbital Transfer Arc
     if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
       const elapsed = (Date.now() - drone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
@@ -376,31 +405,103 @@ function DroneMesh({
       const pos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
 
-      // Dynamically orient drone toward curved flight path tangent vector
+      // Dynamic Flight Regimes:
+      // - progress < 0.38: Acceleration burn (prograde)
+      // - 0.38 <= progress <= 0.68: Coasting
+      // - progress > 0.68: Retrograde braking burn (180° flip to decelerate)
+      let phase: "accel" | "coast" | "brake" = "accel";
+      if (progress > 0.68) {
+        phase = "brake";
+      } else if (progress >= 0.38) {
+        phase = "coast";
+      }
+      if (flightPhase !== phase) {
+        setFlightPhase(phase);
+      }
+
       if (modelRef.current) {
         const tangent = getOrbitalArcTangent(drone.flight.startPosition, drone.flight.targetPosition, eased);
-        const lookTarget = new THREE.Vector3(
-          pos[0] + tangent[0],
-          pos[1] + tangent[1],
-          pos[2] + tangent[2]
-        );
-        modelRef.current.lookAt(lookTarget);
+        if (phase === "brake") {
+          // Retrograde flip: orient thruster along flight vector to brake
+          const retroTarget = new THREE.Vector3(
+            pos[0] - tangent[0],
+            pos[1] - tangent[1],
+            pos[2] - tangent[2]
+          );
+          modelRef.current.lookAt(retroTarget);
+        } else {
+          // Prograde acceleration or coasting
+          const proTarget = new THREE.Vector3(
+            pos[0] + tangent[0],
+            pos[1] + tangent[1],
+            pos[2] + tangent[2]
+          );
+          modelRef.current.lookAt(proTarget);
+        }
       }
-    } else {
+
+      // Animate thruster flame scale based on burn regime
+      if (thrusterRef.current) {
+        if (phase === "accel") {
+          thrusterRef.current.scale.set(1, 1 + Math.sin(clock.elapsedTime * 22) * 0.15, 1.4);
+        } else if (phase === "coast") {
+          thrusterRef.current.scale.set(0.35, 0.35, 0.3);
+        } else {
+          thrusterRef.current.scale.set(0.9, 0.9 + Math.sin(clock.elapsedTime * 18) * 0.12, 1.25);
+        }
+      }
+    } else if (drone.status === "capturing") {
+      // 2. Target Rendezvous & Capturing: Spin-matching & Clamping
       groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
       if (modelRef.current) {
-        modelRef.current.rotation.y += 0.006;
+        if (drone.subStatus === "detumbling") {
+          // Spin-matching detumble synchronization with tumbling space debris
+          modelRef.current.rotation.x = Math.sin(clock.elapsedTime * 2.8) * 0.35;
+          modelRef.current.rotation.y += 0.038;
+          modelRef.current.rotation.z = Math.cos(clock.elapsedTime * 2.2) * 0.28;
+        } else {
+          // Clamping: Stabilize rigid body orientation
+          modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.08);
+          modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.08);
+          modelRef.current.rotation.y += 0.008;
+        }
+      }
+    } else {
+      // 3. Docked at Station Berths: Synchronize with station ring rotation
+      const ringAngle = -clock.elapsedTime * 0.12;
+      const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
+      groupRef.current.position.set(berthPos[0], berthPos[1], berthPos[2]);
+
+      if (modelRef.current) {
+        const normal = getBerthOutwardNormal(drone.berthId, ringAngle);
+        const lookTarget = new THREE.Vector3(
+          berthPos[0] + normal[0],
+          berthPos[1] + normal[1],
+          berthPos[2] + normal[2]
+        );
+        modelRef.current.lookAt(lookTarget);
       }
     }
 
     // Capture visual pulse
     if (modelRef.current && drone.status === "capturing") {
-      const pulse = 1 + Math.sin(clock.elapsedTime * 14) * 0.25;
+      const pulse = 1 + Math.sin(clock.elapsedTime * 14) * 0.08;
       modelRef.current.scale.setScalar(pulse);
     } else if (modelRef.current) {
       modelRef.current.scale.setScalar(1);
     }
   });
+
+  const isFiringThruster =
+    (drone.status === "intercepting" || drone.status === "returning") &&
+    (flightPhase === "accel" || flightPhase === "brake" || flightPhase === "coast");
+
+  const thrusterColor =
+    flightPhase === "brake"
+      ? "#FF9900"
+      : drone.status === "intercepting"
+      ? "#00BFFF"
+      : "#00FF66";
 
   return (
     <group
@@ -423,7 +524,11 @@ function DroneMesh({
     >
       {/* 3D Extraction Drone GLB Model */}
       <group ref={modelRef}>
-        <DroneGLBModel status={drone.status} color={baseColor} />
+        <DroneGLBModel
+          status={drone.status}
+          subStatus={drone.subStatus}
+          color={baseColor}
+        />
 
         {/* Carried Debris clamped firmly in Forward Extraction Claws during Capture/Transit */}
         {carriedDebris && (
@@ -438,29 +543,117 @@ function DroneMesh({
           </group>
         )}
 
-        {/* Dynamic Thruster / Engine Plume during Flight */}
-        {(drone.status === "intercepting" || drone.status === "returning") && (
-          <group position={[0, 0, -0.09]} rotation={[Math.PI / 2, 0, 0]}>
+        {/* Dynamic Main Ion Thruster Plume during Flight */}
+        {isFiringThruster && (
+          <group ref={thrusterRef} position={[0, 0, -0.09]} rotation={[Math.PI / 2, 0, 0]}>
+            {/* Outer Plasma Sheath */}
             <mesh>
-              <coneGeometry args={[0.035, 0.12, 8]} />
+              <coneGeometry args={[0.035, 0.13, 12]} />
               <meshBasicMaterial
-                color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
+                color={thrusterColor}
                 transparent
-                opacity={0.85}
+                opacity={flightPhase === "coast" ? 0.35 : 0.85}
+                toneMapped={false}
+              />
+            </mesh>
+            {/* Inner Core Ion Beam */}
+            <mesh position={[0, -0.02, 0]}>
+              <coneGeometry args={[0.016, 0.08, 8]} />
+              <meshBasicMaterial
+                color="#FFFFFF"
+                transparent
+                opacity={0.9}
                 toneMapped={false}
               />
             </mesh>
             <pointLight
-              color={drone.status === "intercepting" ? "#00BFFF" : "#00FF66"}
-              intensity={2}
+              color={thrusterColor}
+              intensity={flightPhase === "coast" ? 0.8 : 2.5}
+              distance={1.0}
+            />
+          </group>
+        )}
+
+        {/* Quad RCS Cold-Gas Attitude Thruster Puffs (Corners of drone) */}
+        {(drone.subStatus === "undocking" ||
+          drone.subStatus === "detumbling" ||
+          drone.subStatus === "docking" ||
+          flightPhase === "coast") && (
+          <group>
+            {[
+              [0.045, 0, 0.045],
+              [-0.045, 0, 0.045],
+              [0.045, 0, -0.045],
+              [-0.045, 0, -0.045]
+            ].map((p, idx) => (
+              <mesh key={idx} position={p as [number, number, number]}>
+                <sphereGeometry args={[0.007, 6, 6]} />
+                <meshBasicMaterial
+                  color="#E0F7FA"
+                  transparent
+                  opacity={0.75}
+                  toneMapped={false}
+                />
+              </mesh>
+            ))}
+          </group>
+        )}
+
+        {/* Electromagnetic Tractor Beam & Laser Guidewire during Capture */}
+        {drone.status === "capturing" && (
+          <group>
+            {/* Central Coherent Laser Tether */}
+            <mesh position={[0, 0, 0.06]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.004, 0.028, 0.11, 12, 1, true]} />
+              <meshBasicMaterial
+                color={drone.subStatus === "clamping" ? "#00FF66" : "#00FFFF"}
+                transparent
+                opacity={drone.subStatus === "clamping" ? 0.85 : 0.65}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+            {/* Containment Ring Pulse */}
+            <mesh position={[0, 0, 0.09]} rotation={[Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.02, 0.035, 16]} />
+              <meshBasicMaterial
+                color={drone.subStatus === "clamping" ? "#FFFFFF" : "#00FFFF"}
+                transparent
+                opacity={0.8}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+            <pointLight
+              color={drone.subStatus === "clamping" ? "#00FF66" : "#00FFFF"}
+              intensity={3.2}
               distance={0.8}
             />
           </group>
         )}
 
-        {/* Capturing Pulse Emitter Light */}
-        {drone.status === "capturing" && (
-          <pointLight color="#ffffff" intensity={3} distance={0.6} />
+        {/* Docked Umbilical Power Feed & Magnetic Mooring Lock Ring */}
+        {isDocked && (
+          <group position={[0, 0, -0.075]}>
+            {/* Port Umbilical Conduit */}
+            <mesh position={[-0.022, -0.012, -0.018]} rotation={[0.25, 0, 0.2]}>
+              <cylinderGeometry args={[0.002, 0.002, 0.04, 6]} />
+              <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+            </mesh>
+            {/* Starboard Umbilical Conduit */}
+            <mesh position={[0.022, -0.012, -0.018]} rotation={[0.25, 0, -0.2]}>
+              <cylinderGeometry args={[0.002, 0.002, 0.04, 6]} />
+              <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+            </mesh>
+            {/* Cradle Magnetic Lock Ring */}
+            <mesh position={[0, -0.01, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.026, 0.038, 16]} />
+              <meshBasicMaterial
+                color="#00FF66"
+                transparent
+                opacity={0.8}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+          </group>
         )}
       </group>
 
@@ -971,13 +1164,17 @@ function OrbitalScene() {
     return () => window.removeEventListener("scale:zoom", handleZoom);
   }, []);
 
-  // Real-time flight position calculator for drones along curved transfer arcs
+  // Real-time flight position calculator for drones along curved transfer arcs and docked berths
   const getDroneRealtimePos = (drone: Drone): [number, number, number] => {
     if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
       const elapsed = (Date.now() - drone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
       return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+    }
+    if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
+      const ringAngle = -((Date.now() / 1000) * 0.12);
+      return getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
     }
     return drone.position;
   };

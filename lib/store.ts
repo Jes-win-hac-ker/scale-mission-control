@@ -1,7 +1,11 @@
 "use client";
 
 import { create } from "zustand";
-import { getDebrisOrbitalPosition } from "./orbital";
+import {
+  DroneBerthId,
+  getBerthWorldPosition,
+  getDebrisOrbitalPosition
+} from "./orbital";
 import {
   MaterialAssay,
   SwarmStrategy,
@@ -22,6 +26,17 @@ export type DroneStatus =
   | "returning"
   | "recovered"
   | "error";
+
+export type DroneSubStatus =
+  | "docked"
+  | "undocking"
+  | "accelerating"
+  | "coasting"
+  | "braking"
+  | "detumbling"
+  | "clamping"
+  | "towing"
+  | "docking";
 
 export type DroneFlight = {
   startPosition: [number, number, number];
@@ -54,8 +69,10 @@ export type Debris = {
 
 export type Drone = {
   id: string;
+  berthId: DroneBerthId;
   position: [number, number, number];
   status: DroneStatus;
+  subStatus?: DroneSubStatus;
   fuel: number; // 0-100
   payload: number;
   targetId: string | null;
@@ -233,8 +250,10 @@ const initialDebris: Debris[] = rawDebris.map((d) => {
 const initialDrones: Drone[] = [
   {
     id: "DRONE-01",
-    position: [2.9, 0.5, 0.5],
+    berthId: "B1",
+    position: [0.38, 1.9, 1.8],
     status: "idle",
+    subStatus: "docked",
     fuel: 95,
     payload: 0,
     targetId: null,
@@ -242,8 +261,10 @@ const initialDrones: Drone[] = [
   },
   {
     id: "DRONE-02",
-    position: [-2.5, 1.1, 1.2],
+    berthId: "B2",
+    position: [-0.38, 1.9, 1.8],
     status: "idle",
+    subStatus: "docked",
     fuel: 88,
     payload: 0,
     targetId: null,
@@ -251,8 +272,10 @@ const initialDrones: Drone[] = [
   },
   {
     id: "DRONE-03",
-    position: [1.5, -1.6, 1.8],
+    berthId: "B3",
+    position: [0.0, 1.9, 2.18],
     status: "idle",
+    subStatus: "docked",
     fuel: 82,
     payload: 0,
     targetId: null,
@@ -260,8 +283,10 @@ const initialDrones: Drone[] = [
   },
   {
     id: "DRONE-04",
-    position: [-1.4, -2.0, -1.6],
+    berthId: "B4",
+    position: [0.0, 1.9, 1.42],
     status: "idle",
+    subStatus: "docked",
     fuel: 75,
     payload: 0,
     targetId: null,
@@ -269,9 +294,11 @@ const initialDrones: Drone[] = [
   },
   {
     id: "DRONE-05",
-    position: [0.6, 2.6, -1.5],
+    berthId: "STAGING",
+    position: [0.0, 2.45, 1.8],
     status: "idle",
-    fuel: 35,
+    subStatus: "docked",
+    fuel: 85,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -438,18 +465,22 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     set({ warning: null });
 
     const droneId = bestDrone.id;
-    const currentDronePos = bestDrone.position;
+    let currentDronePos = bestDrone.position;
+    if (bestDrone.status === "idle" || bestDrone.subStatus === "docked") {
+      const ringAngle = -((Date.now() / 1000) * 0.12);
+      currentDronePos = getBerthWorldPosition(bestDrone.berthId, depot.position, ringAngle);
+    }
     const debrisPos = currentDebrisPos;
     const depotPos = depot.position;
     const droneSpeed = bestDrone.speed;
 
     // Distances and time-based durations
     const interceptDist = distance(currentDronePos, debrisPos);
-    const interceptDurationSec = Math.max(1, interceptDist / droneSpeed);
+    const interceptDurationSec = Math.max(1.2, interceptDist / droneSpeed);
     const interceptDurationMs = interceptDurationSec * 1000;
 
     const returnDist = distance(debrisPos, depotPos);
-    const returnDurationSec = Math.max(1, returnDist / droneSpeed);
+    const returnDurationSec = Math.max(1.2, returnDist / droneSpeed);
     const returnDurationMs = returnDurationSec * 1000;
 
     const dvTotal = calculateDeltaV(interceptDist, 0) + calculateDeltaV(returnDist, target.mass);
@@ -457,7 +488,10 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     // Protocol Step 3 & 4:
     // Assign drone to debris, set drone status to "intercepting", set debris to "targeted"
     get().addLog(`GO-FETCH ISSUED // TARGET: ${target.id} // THREAT: ${target.threatIndex}/100`, "action");
-    get().addLog(`${droneId} ASSIGNED // Δv: ${dvTotal.toLocaleString()} m/s // EST. BURN: ${chosenFuelCost} kg`, "action");
+    get().addLog(
+      `${droneId} [${bestDrone.berthId}] UNMOORING // RCS CLEARANCE & ION INJECTION // Δv: ${dvTotal.toLocaleString()} m/s // BURN: ${chosenFuelCost} kg`,
+      "action"
+    );
 
     set((current) => ({
       debris: current.debris.map((item) =>
@@ -470,6 +504,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
           ? {
               ...d,
               status: "intercepting",
+              subStatus: "accelerating",
               targetId: target.id,
               flight: {
                 startPosition: currentDronePos,
@@ -486,16 +521,19 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     // Step 5 & 6:
     // Animate to debris. When drone reaches debris:
     // - set drone status to "capturing"
-    // - wait 1.5 seconds
-    // - set debris status to "captured"
+    // - detumble / spin-matching
+    // - mechanical clamping
     setTimeout(() => {
-      // Reached debris -> capturing
+      // Step 5A: Reached debris -> Spin-matching & Detumbling
+      get().addLog(`${droneId} RENDEZVOUS // SPIN-MATCHING & DETUMBLING ${target.id}`, "action");
+
       set((current) => ({
         drones: current.drones.map((d) =>
           d.id === droneId
             ? {
                 ...d,
                 status: "capturing",
+                subStatus: "detumbling",
                 position: debrisPos,
                 flight: undefined
               }
@@ -503,103 +541,115 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         )
       }));
 
-      // Wait 1.5 seconds
+      // Step 5B: Clamping & Grapple lock after 800ms
       setTimeout(() => {
-        // Step 6 continued: set debris status to "captured"
-        get().addLog(`${droneId} CAPTURED ${target.id} // SECURING CLAMP SYSTEM`, "success");
-
-        // Step 7: set drone status to "returning"
-        get().addLog(`${droneId} INITIATING TOW RETURN TO ${depot.id}`, "action");
+        get().addLog(`${droneId} EXTRACTION RIG DEPLOYED // TRACTOR FIELD & CLAMPS LOCKED`, "success");
 
         set((current) => ({
-          debris: current.debris.map((item) =>
-            item.id === target.id ? { ...item, status: "captured" } : item
-          ),
           drones: current.drones.map((d) =>
-            d.id === droneId
-              ? {
-                  ...d,
-                  status: "returning",
-                  payload: target.mass,
-                  flight: {
-                    startPosition: debrisPos,
-                    targetPosition: depotPos,
-                    startTime: Date.now(),
-                    duration: returnDurationSec,
-                    fuelCost: chosenFuelCost
-                  }
-                }
-              : d
+            d.id === droneId ? { ...d, subStatus: "clamping" } : d
           )
         }));
 
-        // Step 8 & 9:
-        // Animate from debris to depot. When drone reaches depot:
+        // Step 6 & 7: Clamping secured -> initiate Tow Return to depot after 1000ms (1.8s total capturing)
         setTimeout(() => {
-          // Drone reaches depot -> recovered & smelted
-          const formattedVal = formatLogValue(target.value);
-          const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
-          const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
-          const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
-          const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
-          const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
+          get().addLog(`${droneId} TOWING ${target.id} // INBOUND TRANSFER TO ${depot.id}`, "action");
 
-          get().addLog(
-            `${target.id} SECURED // +${target.mass} kg // +${formattedVal} // SMELTED: +${titaniumKg}kg Ti, +${preciousKg}kg Pt, +${semiKg}kg Si, +${propellantKg}kg FUEL`,
-            "success"
-          );
-
-          set((current) => {
-            const thisDrone = current.drones.find((d) => d.id === droneId);
-            const baseFuel = thisDrone
-              ? Math.max(0, Math.round((thisDrone.fuel - chosenFuelCost) * 10) / 10)
-              : 0;
-
-            // In-situ propellant recycling
-            const refuelBonus = Math.min(30, Math.round(propellantKg * 0.75));
-            const newFuel = Math.min(100, Math.round((baseFuel + refuelBonus) * 10) / 10);
-
-            return {
-              totalRecoveredMass: current.totalRecoveredMass + target.mass,
-              totalRecoveredValue: current.totalRecoveredValue + target.value,
-              stockpile: {
-                titanium: current.stockpile.titanium + titaniumKg,
-                preciousMetals: current.stockpile.preciousMetals + preciousKg,
-                semiconductors: current.stockpile.semiconductors + semiKg,
-                propellant: current.stockpile.propellant + propellantKg,
-                silicates: current.stockpile.silicates + silicatesKg
-              },
-              debris: current.debris.map((item) =>
-                item.id === target.id
-                  ? { ...item, status: "recovered", position: depotPos }
-                  : item
-              ),
-              drones: current.drones.map((d) =>
-                d.id === droneId
-                  ? {
-                      ...d,
-                      status: "recovered",
-                      position: depotPos,
-                      fuel: newFuel,
-                      payload: 0,
-                      targetId: null,
-                      flight: undefined
+          set((current) => ({
+            debris: current.debris.map((item) =>
+              item.id === target.id ? { ...item, status: "captured" } : item
+            ),
+            drones: current.drones.map((d) =>
+              d.id === droneId
+                ? {
+                    ...d,
+                    status: "returning",
+                    subStatus: "towing",
+                    payload: target.mass,
+                    flight: {
+                      startPosition: debrisPos,
+                      targetPosition: depotPos,
+                      startTime: Date.now(),
+                      duration: returnDurationSec,
+                      fuelCost: chosenFuelCost
                     }
-                  : d
-              )
-            };
-          });
+                  }
+                : d
+            )
+          }));
 
-          // After 1 second, set drone status back to "idle"
+          // Step 8 & 9: Inbound flight reaches depot -> smelting handoff & berth docking
           setTimeout(() => {
-            set((current) => ({
-              drones: current.drones.map((d) =>
-                d.id === droneId ? { ...d, status: "idle" } : d
-              )
-            }));
-          }, 1000);
-        }, returnDurationMs);
-      }, 1500);
+            const formattedVal = formatLogValue(target.value);
+            const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
+            const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
+            const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
+            const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
+            const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
+
+            get().addLog(
+              `${target.id} SECURED & SMELTED // +${target.mass} kg // +${formattedVal} // Ti: +${titaniumKg}kg, Pt: +${preciousKg}kg, Si: +${semiKg}kg, FUEL: +${propellantKg}kg`,
+              "success"
+            );
+            get().addLog(`${droneId} PAYLOAD TRANSFERRED // APPROACHING BERTH ${bestDrone.berthId}`, "action");
+
+            set((current) => {
+              const thisDrone = current.drones.find((d) => d.id === droneId);
+              const baseFuel = thisDrone
+                ? Math.max(0, Math.round((thisDrone.fuel - chosenFuelCost) * 10) / 10)
+                : 0;
+
+              // In-situ propellant recycling
+              const refuelBonus = Math.min(30, Math.round(propellantKg * 0.75));
+              const newFuel = Math.min(100, Math.round((baseFuel + refuelBonus) * 10) / 10);
+
+              return {
+                totalRecoveredMass: current.totalRecoveredMass + target.mass,
+                totalRecoveredValue: current.totalRecoveredValue + target.value,
+                stockpile: {
+                  titanium: current.stockpile.titanium + titaniumKg,
+                  preciousMetals: current.stockpile.preciousMetals + preciousKg,
+                  semiconductors: current.stockpile.semiconductors + semiKg,
+                  propellant: current.stockpile.propellant + propellantKg,
+                  silicates: current.stockpile.silicates + silicatesKg
+                },
+                debris: current.debris.map((item) =>
+                  item.id === target.id
+                    ? { ...item, status: "recovered", position: depotPos }
+                    : item
+                ),
+                drones: current.drones.map((d) =>
+                  d.id === droneId
+                    ? {
+                        ...d,
+                        status: "recovered",
+                        subStatus: "docking",
+                        position: depotPos,
+                        fuel: newFuel,
+                        payload: 0,
+                        targetId: null,
+                        flight: undefined
+                      }
+                    : d
+                )
+              };
+            });
+
+            // After 1.2s: Soft capture complete, moored at berth
+            setTimeout(() => {
+              get().addLog(
+                `${droneId} MOORED AT BERTH ${bestDrone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
+                "success"
+              );
+              set((current) => ({
+                drones: current.drones.map((d) =>
+                  d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
+                )
+              }));
+            }, 1200);
+          }, returnDurationMs);
+        }, 1000);
+      }, 800);
     }, interceptDurationMs);
 
     return true;
