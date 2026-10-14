@@ -171,6 +171,13 @@ export function getOrbitalArcSamples(
   return samples;
 }
 
+// Unified angular rotation speed for DEPOT-01 centrifugal habitat ring (rad/s)
+export const STATION_RING_ROTATION_SPEED = 0.22;
+
+export function getStationRingAngle(timeSec: number): number {
+  return timeSec * STATION_RING_ROTATION_SPEED;
+}
+
 // Mooring Berth IDs and Spatial Config for DEPOT-01 Ring & Staging
 export type DroneBerthId = "B1" | "B2" | "B3" | "B4" | "STAGING";
 
@@ -186,7 +193,7 @@ export const BERTH_CONFIGS: Record<DroneBerthId, BerthConfig> = {
   B2: { id: "B2", label: "Mooring Berth B2 (Starboard)", localPos: [-0.38, 0, 0], outwardAngle: Math.PI },
   B3: { id: "B3", label: "Mooring Berth B3 (Forward)", localPos: [0, 0, 0.38], outwardAngle: Math.PI / 2 },
   B4: { id: "B4", label: "Mooring Berth B4 (Aft)", localPos: [0, 0, -0.38], outwardAngle: -Math.PI / 2 },
-  STAGING: { id: "STAGING", label: "Orbital Reserve Staging", localPos: [0, 0.55, 0], outwardAngle: 0 }
+  STAGING: { id: "STAGING", label: "Orbital Reserve Staging Gantry", localPos: [0, 0.55, 0], outwardAngle: 0 }
 };
 
 // Computes real-time 3D world coordinate of a station mooring berth taking into account ring rotation
@@ -226,4 +233,5 @@ export function getBerthOutwardNormal(
   const len = Math.sqrt(rx * rx + rz * rz) || 1;
   return [rx / len, 0, rz / len];
 }
+
 

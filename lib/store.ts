@@ -4,7 +4,8 @@ import { create } from "zustand";
 import {
   DroneBerthId,
   getBerthWorldPosition,
-  getDebrisOrbitalPosition
+  getDebrisOrbitalPosition,
+  getStationRingAngle
 } from "./orbital";
 import {
   MaterialAssay,
@@ -312,6 +313,7 @@ type MissionState = {
   selectedDebrisId: string;
   focusedEntity: FocusedEntity;
   missionStartedAt: number;
+  lastSmeltedAt?: number;
   totalRecoveredMass: number;
   totalRecoveredValue: number;
   stockpile: DepotStockpile;
@@ -467,7 +469,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const droneId = bestDrone.id;
     let currentDronePos = bestDrone.position;
     if (bestDrone.status === "idle" || bestDrone.subStatus === "docked") {
-      const ringAngle = -((Date.now() / 1000) * 0.12);
+      const ringAngle = getStationRingAngle(Date.now() / 1000);
       currentDronePos = getBerthWorldPosition(bestDrone.berthId, depot.position, ringAngle);
     }
     const debrisPos = currentDebrisPos;
@@ -606,6 +608,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
               return {
                 totalRecoveredMass: current.totalRecoveredMass + target.mass,
                 totalRecoveredValue: current.totalRecoveredValue + target.value,
+                lastSmeltedAt: Date.now(),
                 stockpile: {
                   titanium: current.stockpile.titanium + titaniumKg,
                   preciousMetals: current.stockpile.preciousMetals + preciousKg,

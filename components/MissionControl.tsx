@@ -358,133 +358,241 @@ export default function MissionControl() {
             )}
           </AnimatePresence>
 
-          {/* Target Focus & GO-FETCH Actions */}
+          {/* Target Focus & GO-FETCH Actions OR Station Hub Telemetry */}
           <AnimatePresence mode="wait">
-            <motion.div
-              key={selected?.id ?? "empty"}
-              className="target-focus"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-            >
-              <div className="focus-header">
-                <span className="panel-kicker">SELECTED TARGET</span>
-                <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
-                  {selected.status}
-                </span>
-              </div>
+            {focusedEntity.type === "depot" ? (
+              <motion.div
+                key="depot-focus"
+                className="target-focus"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+              >
+                <div className="focus-header">
+                  <span className="panel-kicker text-cyan font-bold tracking-widest">
+                    ORBITAL RECOVERY HUB // DEPOT-01
+                  </span>
+                  <span className="status-chip text-emerald-400 border-emerald-400/50 bg-emerald-400/10">
+                    ISRU REFINERY ONLINE · 5 MOORING BERTHS
+                  </span>
+                </div>
 
-              <div className="focus-title">
-                <h2>{selected.id}</h2>
-                <span className="target-mat">{selected.material}</span>
-              </div>
+                <div className="focus-title">
+                  <h2>PROJECT S.C.A.L.E. RECOVERY DEPOT</h2>
+                  <span className="target-mat">CENTRAL DOCKING STATION & INDUCTION SMELTING COMPLEX</span>
+                </div>
 
-              <div className="focus-meta-grid">
-                <div className="meta-cell">
-                  <span className="cell-label">MASS</span>
-                  <strong>{selected.mass} kg</strong>
+                <div className="focus-meta-grid">
+                  <div className="meta-cell">
+                    <span className="cell-label">ORBITAL REGIME</span>
+                    <strong>420.0 km LEO (51.6°)</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">TOTAL STORED MASS</span>
+                    <strong className="text-emerald-400">{totalRecoveredMass} kg</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">EXTRACTED VALUE</span>
+                    <strong className="text-amber">{formatMoney(totalRecoveredValue)}</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">CENTRIFUGAL SPIN</span>
+                    <strong className="text-cyan">0.22 rad/s (SYNCED)</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">BERTH OCCUPANCY</span>
+                    <strong>
+                      {drones.filter((d) => d.status === "idle" || d.subStatus === "docked").length} / 5 MOORED
+                    </strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">INDUCTION REFINERY</span>
+                    <strong className="text-emerald-400">ISRU REACTOR READY</strong>
+                  </div>
                 </div>
-                <div className="meta-cell">
-                  <span className="cell-label">REPURPOSE VALUE</span>
-                  <strong className="text-amber">{formatMoney(selected.value)}</strong>
-                </div>
-                <div className="meta-cell">
-                  <span className="cell-label">Δv BUDGET (TRANSFER)</span>
-                  <strong className="text-cyan">{(selected.deltaVBudget ?? 1850).toLocaleString()} m/s</strong>
-                </div>
-                <div className="meta-cell">
-                  <span className="cell-label">KESSLER THREAT INDEX</span>
-                  <strong className={(selected.threatIndex ?? 30) > 50 ? "text-amber" : "text-emerald-400"}>
-                    {selected.threatIndex ?? 35} / 100
-                  </strong>
-                </div>
-                <div className="meta-cell">
-                  <span className="cell-label">EST. PROP. BURN</span>
-                  <strong>{estimatedRecoveryFuel} kg</strong>
-                </div>
-                <div className="meta-cell">
-                  <span className="cell-label">ASSIGNED UNIT</span>
-                  <strong className="text-cyan">
-                    {assignedDrone ? assignedDrone.id : "--"}
-                  </strong>
-                </div>
-              </div>
 
-              {/* Material Spectroscopy Assay Bar */}
-              {selected.assay && (
+                {/* 5-Bay Mooring & Gantry Allocation Ledger */}
                 <div className="assay-card">
                   <div className="assay-title">
-                    <span>MATERIAL SPECTROSCOPY ASSAY</span>
-                    <span className="text-cyan font-mono">REFINERY TARGETS</span>
+                    <span>MOORING BERTH & GANTRY ALLOCATION</span>
+                    <span className="text-cyan font-mono">DOCKING CRADLES</span>
                   </div>
-                  <div className="assay-bar">
-                    <div style={{ width: `${selected.assay.titanium}%`, background: "#38bdf8" }} className="assay-segment" title={`Titanium / Structural: ${selected.assay.titanium}%`} />
-                    <div style={{ width: `${selected.assay.preciousMetals}%`, background: "#fbbf24" }} className="assay-segment" title={`Precious / Platinum: ${selected.assay.preciousMetals}%`} />
-                    <div style={{ width: `${selected.assay.semiconductor}%`, background: "#c084fc" }} className="assay-segment" title={`Silicon / Avionics: ${selected.assay.semiconductor}%`} />
-                    <div style={{ width: `${selected.assay.propellant}%`, background: "#22c55e" }} className="assay-segment" title={`Hydrazine Fuel: ${selected.assay.propellant}%`} />
-                    <div style={{ width: `${selected.assay.silicates}%`, background: "#94a3b8" }} className="assay-segment" title={`Silicates / Slag: ${selected.assay.silicates}%`} />
-                  </div>
-                  <div className="assay-tags">
-                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#38bdf8" }} /> Ti: {selected.assay.titanium}%</span>
-                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#fbbf24" }} /> Pt: {selected.assay.preciousMetals}%</span>
-                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#c084fc" }} /> Si: {selected.assay.semiconductor}%</span>
-                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#22c55e" }} /> Fuel: {selected.assay.propellant}%</span>
+                  <div className="grid grid-cols-5 gap-2 mt-2 font-mono text-xs">
+                    {(["B1", "B2", "B3", "B4", "STAGING"] as const).map((bId) => {
+                      const d = drones.find((drone) => drone.berthId === bId);
+                      const isDocked = d && (d.status === "idle" || d.subStatus === "docked");
+                      return (
+                        <div
+                          key={bId}
+                          className={`p-2 rounded border cursor-pointer transition-all ${
+                            isDocked
+                              ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
+                              : "bg-slate-900/60 border-cyan/30 text-cyan hover:border-cyan"
+                          }`}
+                          onClick={() => {
+                            if (d) focusEntity("drone", d.id);
+                          }}
+                          title={d ? `Focus camera on ${d.id}` : "Empty cradle"}
+                        >
+                          <div className="text-[10px] text-slate-400">{bId}</div>
+                          <div className="font-bold">{d ? d.id : "EMPTY"}</div>
+                          <div className="text-[9px] text-slate-400">
+                            {d ? (d.subStatus ? d.subStatus.toUpperCase() : d.status.toUpperCase()) : "STANDBY"}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
 
-              {/* Swarm Optimization Strategy Selector */}
-              <div className="strategy-selector">
-                <span className="strategy-label">SWARM BRAIN // HUNGARIAN OPTIMIZER:</span>
-                <div className="strategy-buttons">
-                  {[
-                    { id: "balanced", label: "PARETO" },
-                    { id: "max_yield", label: "VALUE" },
-                    { id: "kessler_defense", label: "DEFENSE" },
-                    { id: "min_delta_v", label: "MIN Δv" }
-                  ].map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={`strategy-btn ${swarmStrategy === mode.id ? "is-active" : ""}`}
-                      onClick={() => setSwarmStrategy(mode.id as any)}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
+                {/* Action Buttons */}
+                <div className="action-button-group">
+                  <button
+                    className="deploy-button go-fetch-btn"
+                    onClick={() => focusEntity("earth")}
+                  >
+                    <span>OVERVIEW PERSPECTIVE</span>
+                    <span className="arrow-icon">⊙</span>
+                  </button>
+
+                  <button
+                    className="auto-dispatch-btn"
+                    disabled={availableDebrisCount === 0 || idleDroneCount === 0}
+                    onClick={autoDispatch}
+                    title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching`}
+                  >
+                    <span>AUTO DISPATCH FLEET</span>
+                    <small>({idleDroneCount} READY · {swarmStrategy.toUpperCase()})</small>
+                  </button>
                 </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="action-button-group">
-                <button
-                  className="deploy-button go-fetch-btn"
-                  disabled={selected.status !== "available"}
-                  onClick={() => goFetch(selected.id)}
-                >
-                  <span>
-                    {selected.status === "available"
-                      ? "GO FETCH"
-                      : selected.status === "targeted"
-                      ? "INTERCEPT IN PROGRESS"
-                      : selected.status === "captured"
-                      ? "RETURNING TO DEPOT"
-                      : "TARGET RECOVERED"}
+              </motion.div>
+            ) : selected ? (
+              <motion.div
+                key={selected.id}
+                className="target-focus"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+              >
+                <div className="focus-header">
+                  <span className="panel-kicker">SELECTED TARGET</span>
+                  <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
+                    {selected.status}
                   </span>
-                  <span className="arrow-icon">▶</span>
-                </button>
+                </div>
 
-                <button
-                  className="auto-dispatch-btn"
-                  disabled={availableDebrisCount === 0 || idleDroneCount === 0}
-                  onClick={autoDispatch}
-                  title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching`}
-                >
-                  <span>AUTO DISPATCH</span>
-                  <small>({idleDroneCount} IDLE · {swarmStrategy.toUpperCase()})</small>
-                </button>
-              </div>
-            </motion.div>
+                <div className="focus-title">
+                  <h2>{selected.id}</h2>
+                  <span className="target-mat">{selected.material}</span>
+                </div>
+
+                <div className="focus-meta-grid">
+                  <div className="meta-cell">
+                    <span className="cell-label">MASS</span>
+                    <strong>{selected.mass} kg</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">REPURPOSE VALUE</span>
+                    <strong className="text-amber">{formatMoney(selected.value)}</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">Δv BUDGET (TRANSFER)</span>
+                    <strong className="text-cyan">{(selected.deltaVBudget ?? 1850).toLocaleString()} m/s</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">KESSLER THREAT INDEX</span>
+                    <strong className={(selected.threatIndex ?? 30) > 50 ? "text-amber" : "text-emerald-400"}>
+                      {selected.threatIndex ?? 35} / 100
+                    </strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">EST. PROP. BURN</span>
+                    <strong>{estimatedRecoveryFuel} kg</strong>
+                  </div>
+                  <div className="meta-cell">
+                    <span className="cell-label">ASSIGNED UNIT</span>
+                    <strong className="text-cyan">
+                      {assignedDrone ? assignedDrone.id : "--"}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Material Spectroscopy Assay Bar */}
+                {selected.assay && (
+                  <div className="assay-card">
+                    <div className="assay-title">
+                      <span>MATERIAL SPECTROSCOPY ASSAY</span>
+                      <span className="text-cyan font-mono">REFINERY TARGETS</span>
+                    </div>
+                    <div className="assay-bar">
+                      <div style={{ width: `${selected.assay.titanium}%`, background: "#38bdf8" }} className="assay-segment" title={`Titanium / Structural: ${selected.assay.titanium}%`} />
+                      <div style={{ width: `${selected.assay.preciousMetals}%`, background: "#fbbf24" }} className="assay-segment" title={`Precious / Platinum: ${selected.assay.preciousMetals}%`} />
+                      <div style={{ width: `${selected.assay.semiconductor}%`, background: "#c084fc" }} className="assay-segment" title={`Silicon / Avionics: ${selected.assay.semiconductor}%`} />
+                      <div style={{ width: `${selected.assay.propellant}%`, background: "#22c55e" }} className="assay-segment" title={`Hydrazine Fuel: ${selected.assay.propellant}%`} />
+                      <div style={{ width: `${selected.assay.silicates}%`, background: "#94a3b8" }} className="assay-segment" title={`Silicates / Slag: ${selected.assay.silicates}%`} />
+                    </div>
+                    <div className="assay-tags">
+                      <span className="assay-tag"><span className="tag-dot" style={{ background: "#38bdf8" }} /> Ti: {selected.assay.titanium}%</span>
+                      <span className="assay-tag"><span className="tag-dot" style={{ background: "#fbbf24" }} /> Pt: {selected.assay.preciousMetals}%</span>
+                      <span className="assay-tag"><span className="tag-dot" style={{ background: "#c084fc" }} /> Si: {selected.assay.semiconductor}%</span>
+                      <span className="assay-tag"><span className="tag-dot" style={{ background: "#22c55e" }} /> Fuel: {selected.assay.propellant}%</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Swarm Optimization Strategy Selector */}
+                <div className="strategy-selector">
+                  <span className="strategy-label">SWARM BRAIN // HUNGARIAN OPTIMIZER:</span>
+                  <div className="strategy-buttons">
+                    {[
+                      { id: "balanced", label: "PARETO" },
+                      { id: "max_yield", label: "VALUE" },
+                      { id: "kessler_defense", label: "DEFENSE" },
+                      { id: "min_delta_v", label: "MIN Δv" }
+                    ].map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={`strategy-btn ${swarmStrategy === mode.id ? "is-active" : ""}`}
+                        onClick={() => setSwarmStrategy(mode.id as any)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="action-button-group">
+                  <button
+                    className="deploy-button go-fetch-btn"
+                    disabled={selected.status !== "available"}
+                    onClick={() => goFetch(selected.id)}
+                  >
+                    <span>
+                      {selected.status === "available"
+                        ? "GO FETCH"
+                        : selected.status === "targeted"
+                        ? "INTERCEPT IN PROGRESS"
+                        : selected.status === "captured"
+                        ? "RETURNING TO DEPOT"
+                        : "TARGET RECOVERED"}
+                    </span>
+                    <span className="arrow-icon">▶</span>
+                  </button>
+
+                  <button
+                    className="auto-dispatch-btn"
+                    disabled={availableDebrisCount === 0 || idleDroneCount === 0}
+                    onClick={autoDispatch}
+                    title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching`}
+                  >
+                    <span>AUTO DISPATCH</span>
+                    <small>({idleDroneCount} IDLE · {swarmStrategy.toUpperCase()})</small>
+                  </button>
+                </div>
+              </motion.div>
+            ) : null}
           </AnimatePresence>
         </div>
 

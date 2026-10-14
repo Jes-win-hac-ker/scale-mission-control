@@ -19,7 +19,9 @@ import {
   getDebrisOrbitTrackSamples,
   getOrbitalArcPoint,
   getOrbitalArcSamples,
-  getOrbitalArcTangent
+  getOrbitalArcTangent,
+  getStationRingAngle,
+  STATION_RING_ROTATION_SPEED
 } from "@/lib/orbital";
 
 
@@ -39,32 +41,68 @@ function OrbitalRecoveryStation({
   const stationGroupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Group>(null);
   const radarRef = useRef<THREE.Group>(null);
+  const solarBoomRef = useRef<THREE.Group>(null);
   const intakePulseRef = useRef<THREE.Mesh>(null);
+  const smeltingFlashRef = useRef<THREE.PointLight>(null);
   const [hovered, setHovered] = useState(false);
 
   const addLog = useMissionStore((state) => state.addLog);
   const totalRecoveredMass = useMissionStore((state) => state.totalRecoveredMass);
   const totalRecoveredValue = useMissionStore((state) => state.totalRecoveredValue);
+  const lastSmeltedAt = useMissionStore((state) => state.lastSmeltedAt);
   const focusEntity = useMissionStore((state) => state.focusEntity);
 
-  // Check if any drone is currently returning or approaching depot
-  const activeIncoming = useMemo(() => {
-    return drones.some((d) => d.status === "returning");
-  }, [drones]);
+  // Check if any drone is docking or recovering payload
+  const isSmeltingActive = useMemo(() => {
+    return lastSmeltedAt ? Date.now() - lastSmeltedAt < 3200 : false;
+  }, [lastSmeltedAt]);
 
-  useFrame((_, delta) => {
-    // Smooth continuous centrifugal spin of habitat ring
+  const drone05 = drones.find((d) => d.id === "DRONE-05");
+  const isStagingDocked = drone05 && (drone05.status === "idle" || drone05.subStatus === "docked");
+  const isStagingIncoming = drone05 && (drone05.status === "returning" || drone05.subStatus === "docking");
+
+  useFrame(({ clock }, delta) => {
+    // 1. Mathematically synchronized centrifugal spin of habitat ring and berths
     if (ringRef.current) {
-      ringRef.current.rotation.y += delta * 0.35;
+      ringRef.current.rotation.y = getStationRingAngle(clock.elapsedTime);
     }
-    // High-frequency telemetry sweep of radar dish
+
+    // 2. High-frequency telemetry sweep of communications radar dish
     if (radarRef.current) {
-      radarRef.current.rotation.y += delta * 1.2;
+      radarRef.current.rotation.y += delta * 1.6;
     }
-    // Pulsing intake glow
+
+    // 3. Continuous Sun-tracking articulation of solar array wings
+    if (solarBoomRef.current) {
+      solarBoomRef.current.rotation.x = Math.sin(clock.elapsedTime * 0.12) * 0.08 + 0.22;
+    }
+
+    // 4. Underside Smelting Reactor and Electromagnetic Field Dynamics
     if (intakePulseRef.current) {
-      const pulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.35;
-      (intakePulseRef.current.material as THREE.MeshBasicMaterial).opacity = pulse;
+      const activeSmelt = lastSmeltedAt ? Date.now() - lastSmeltedAt < 3200 : false;
+      if (activeSmelt) {
+        const pulse = 0.8 + Math.sin(clock.elapsedTime * 24) * 0.2;
+        (intakePulseRef.current.material as THREE.MeshBasicMaterial).opacity = pulse;
+        (intakePulseRef.current.material as THREE.MeshBasicMaterial).color.set("#FFAA00");
+        intakePulseRef.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 16) * 0.18);
+      } else {
+        const pulse = 0.5 + Math.sin(clock.elapsedTime * 5) * 0.25;
+        (intakePulseRef.current.material as THREE.MeshBasicMaterial).opacity = pulse;
+        (intakePulseRef.current.material as THREE.MeshBasicMaterial).color.set("#00FFFF");
+        intakePulseRef.current.scale.setScalar(1);
+      }
+    }
+
+    // 5. Smelting thermal flare intensity decay
+    if (smeltingFlashRef.current) {
+      const activeSmelt = lastSmeltedAt ? Date.now() - lastSmeltedAt < 3200 : false;
+      if (activeSmelt) {
+        smeltingFlashRef.current.intensity = 5.0 + Math.sin(clock.elapsedTime * 30) * 1.5;
+        smeltingFlashRef.current.color.set("#FF7700");
+      } else {
+        smeltingFlashRef.current.intensity = 1.8;
+        smeltingFlashRef.current.color.set("#00FFFF");
+      }
     }
   });
 
@@ -73,7 +111,7 @@ function OrbitalRecoveryStation({
     focusEntity("depot", "DEPOT-01");
     const valString = (totalRecoveredValue / 1_000_000).toFixed(2);
     addLog(
-      `DEPOT-01 STATUS // ORBITAL RECOVERY HUB // STORED MASS: ${totalRecoveredMass} kg // SALVAGE VALUE: $${valString}M // 4 BERTHS ONLINE`,
+      `DEPOT-01 TELEMETRY // ORBITAL RECOVERY HUB // STORED MASS: ${totalRecoveredMass} kg // VALUE: $${valString}M // 4 MOORING BERTHS & STAGING GANTRY ONLINE`,
       "info"
     );
   };
@@ -93,31 +131,42 @@ function OrbitalRecoveryStation({
         document.body.style.cursor = "default";
       }}
     >
-      {/* 1. Central Pressurized Command Hub */}
+      {/* 1. Central Pressurized Command Hub & Avionics Core */}
       <mesh>
-        <cylinderGeometry args={[0.08, 0.09, 0.42, 16]} />
+        <cylinderGeometry args={[0.082, 0.092, 0.44, 16]} />
         <meshStandardMaterial
           color="#334155"
-          metalness={0.85}
-          roughness={0.25}
+          metalness={0.88}
+          roughness={0.22}
         />
       </mesh>
 
-      {/* Observation Ring & Visor Windows */}
+      {/* Observation Cupola & Visor Windows Ring */}
       <mesh position={[0, 0.06, 0]}>
-        <cylinderGeometry args={[0.088, 0.088, 0.05, 16]} />
+        <cylinderGeometry args={[0.091, 0.091, 0.048, 16]} />
         <meshBasicMaterial color="#00FFFF" toneMapped={false} />
       </mesh>
 
-      {/* 2. Top Communications Tower & Sweeping Radar Spire */}
-      <group position={[0, 0.21, 0]}>
+      {/* Primary Structural Ring Reinforcement Clamps */}
+      <mesh position={[0, -0.04, 0]}>
+        <cylinderGeometry args={[0.095, 0.095, 0.02, 16]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
+      </mesh>
+      <mesh position={[0, 0.14, 0]}>
+        <cylinderGeometry args={[0.095, 0.095, 0.02, 16]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
+      </mesh>
+
+      {/* 2. Top Communications Tower & Sweeping Phased Array Spire */}
+      <group position={[0, 0.22, 0]}>
+        {/* Lattice Communications Mast */}
         <mesh position={[0, 0.08, 0]}>
           <cylinderGeometry args={[0.012, 0.018, 0.16, 8]} />
           <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
         </mesh>
         {/* Sweeping High-Gain Radar Dish */}
         <group ref={radarRef} position={[0, 0.17, 0]}>
-          <mesh rotation={[0.4, 0, 0]}>
+          <mesh rotation={[0.42, 0, 0]}>
             <coneGeometry args={[0.055, 0.025, 16, 1, true]} />
             <meshStandardMaterial color="#94a3b8" metalness={0.9} roughness={0.15} side={THREE.DoubleSide} />
           </mesh>
@@ -126,50 +175,125 @@ function OrbitalRecoveryStation({
             <meshBasicMaterial color="#00FFCC" toneMapped={false} />
           </mesh>
         </group>
-        {/* Beacon light */}
+        {/* Anti-collision aviation beacon strobe */}
         <pointLight color="#00FFCC" intensity={1.8} distance={2.5} />
       </group>
 
-      {/* 3. Elevated Articulating Solar Array Wings (y = +0.18, completely clear of ring and berths) */}
-      <group position={[0, 0.18, 0]}>
+      {/* Microwave Carrier Downlink to Earth (Telecommunications Beam) */}
+      <mesh position={[0, -0.9, -0.85]} rotation={[0.76, 0, 0]}>
+        <cylinderGeometry args={[0.002, 0.002, 2.3, 6]} />
+        <meshBasicMaterial
+          color="#00FFFF"
+          transparent
+          opacity={0.16}
+          toneMapped={false}
+        />
+      </mesh>
+
+      {/* 3. Upper Reserve Staging Gantry (Mooring Bay for DRONE-05 at y = +0.55) */}
+      <group position={[0, 0.55, 0]}>
+        {/* Gantry Structural Support Column connecting from top tower */}
+        <mesh position={[0, -0.10, 0]}>
+          <cylinderGeometry args={[0.014, 0.014, 0.20, 8]} />
+          <meshStandardMaterial color="#475569" metalness={0.9} roughness={0.2} />
+        </mesh>
+        {/* Hexagonal Staging Docking Deck */}
+        <mesh position={[0, 0, 0]}>
+          <cylinderGeometry args={[0.075, 0.085, 0.022, 6]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.92} roughness={0.18} />
+        </mesh>
+        {/* Magnetic Mooring Target Ring */}
+        <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.032, 0.052, 16]} />
+          <meshBasicMaterial
+            color={isStagingDocked ? "#00FF66" : isStagingIncoming ? "#FFBF00" : "#00FFFF"}
+            transparent
+            opacity={0.85}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Platform Approach Guide Lights */}
+        {[-0.045, 0.045].map((x, i) => (
+          <mesh key={i} position={[x, 0.015, 0]}>
+            <sphereGeometry args={[0.005, 8, 8]} />
+            <meshBasicMaterial
+              color={isStagingDocked ? "#00FF66" : isStagingIncoming ? "#FFBF00" : "#00FFCC"}
+            />
+          </mesh>
+        ))}
+        {/* Reserve Umbilical Power / Fuel Recharging Port */}
+        <mesh position={[0, 0.015, -0.04]}>
+          <boxGeometry args={[0.016, 0.014, 0.012]} />
+          <meshStandardMaterial color="#64748b" metalness={0.8} />
+        </mesh>
+      </group>
+
+      {/* 4. Elevated Articulating Sun-Tracking Solar Array Wings (y = +0.18) */}
+      <group ref={solarBoomRef} position={[0, 0.18, 0]}>
         {/* Continuous Structural Boom through Central Hub */}
         <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.008, 0.008, 0.88, 8]} />
-          <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
+          <cylinderGeometry args={[0.009, 0.009, 0.92, 8]} />
+          <meshStandardMaterial color="#64748b" metalness={0.92} roughness={0.18} />
         </mesh>
         {/* Port Solar Wing Panel */}
-        <group position={[-0.42, 0, 0]}>
+        <group position={[-0.44, 0, 0]}>
           <mesh>
-            <boxGeometry args={[0.32, 0.008, 0.12]} />
+            <boxGeometry args={[0.34, 0.008, 0.13]} />
             <meshStandardMaterial
               color="#1e3a8a"
-              metalness={0.9}
-              roughness={0.15}
+              metalness={0.92}
+              roughness={0.14}
             />
+          </mesh>
+          {/* Photovoltaic Cell Busbar Grid */}
+          <mesh position={[0, 0.005, 0]}>
+            <boxGeometry args={[0.33, 0.002, 0.004]} />
+            <meshBasicMaterial color="#94a3b8" />
+          </mesh>
+          <mesh position={[0, 0.005, 0.04]}>
+            <boxGeometry args={[0.33, 0.002, 0.003]} />
+            <meshBasicMaterial color="#94a3b8" />
+          </mesh>
+          <mesh position={[0, 0.005, -0.04]}>
+            <boxGeometry args={[0.33, 0.002, 0.003]} />
+            <meshBasicMaterial color="#94a3b8" />
           </mesh>
         </group>
         {/* Starboard Solar Wing Panel */}
-        <group position={[0.42, 0, 0]}>
+        <group position={[0.44, 0, 0]}>
           <mesh>
-            <boxGeometry args={[0.32, 0.008, 0.12]} />
+            <boxGeometry args={[0.34, 0.008, 0.13]} />
             <meshStandardMaterial
               color="#1e3a8a"
-              metalness={0.9}
-              roughness={0.15}
+              metalness={0.92}
+              roughness={0.14}
             />
+          </mesh>
+          {/* Photovoltaic Cell Busbar Grid */}
+          <mesh position={[0, 0.005, 0]}>
+            <boxGeometry args={[0.33, 0.002, 0.004]} />
+            <meshBasicMaterial color="#94a3b8" />
+          </mesh>
+          <mesh position={[0, 0.005, 0.04]}>
+            <boxGeometry args={[0.33, 0.002, 0.003]} />
+            <meshBasicMaterial color="#94a3b8" />
+          </mesh>
+          <mesh position={[0, 0.005, -0.04]}>
+            <boxGeometry args={[0.33, 0.002, 0.003]} />
+            <meshBasicMaterial color="#94a3b8" />
           </mesh>
         </group>
       </group>
 
-      {/* 4. Horizontal Counter-Rotating Toroidal Habitat Ring & Mooring Berths */}
+      {/* 5. Synchronous Counter-Rotating Toroidal Habitat Ring & Mooring Berths */}
       <group ref={ringRef} position={[0, 0, 0]}>
-        {/* Equatorial Torus (rotated Math.PI/2 to lie horizontally around Y axis) */}
+        {/* Equatorial Torus (horizontal ring around Y axis) */}
         <mesh rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.36, 0.024, 16, 64]} />
           <meshStandardMaterial
             color="#475569"
-            metalness={0.8}
-            roughness={0.3}
+            metalness={0.82}
+            roughness={0.28}
           />
         </mesh>
         {/* Torus Edge Neon Trim Ring */}
@@ -193,89 +317,144 @@ function OrbitalRecoveryStation({
           <meshStandardMaterial color="#64748b" metalness={0.85} roughness={0.25} />
         </mesh>
 
-        {/* 4 Outer-Rim Drone Mooring Berths mounted directly at spoke ends (radius = 0.38) */}
+        {/* 4 Outer-Rim Drone Mooring Berths mounted at spoke ends (radius = 0.38) */}
         {[
-          { id: "B1", pos: [0.38, 0, 0], rot: [0, 0, -Math.PI / 2] },
-          { id: "B2", pos: [-0.38, 0, 0], rot: [0, 0, Math.PI / 2] },
-          { id: "B3", pos: [0, 0, 0.38], rot: [Math.PI / 2, 0, 0] },
-          { id: "B4", pos: [0, 0, -0.38], rot: [-Math.PI / 2, 0, 0] }
-        ].map((berth) => (
-          <group
-            key={berth.id}
-            position={berth.pos as [number, number, number]}
-            rotation={berth.rot as [number, number, number]}
-          >
-            {/* Magnetic Mooring Cradle Base */}
-            <mesh>
-              <cylinderGeometry args={[0.045, 0.05, 0.02, 12]} />
-              <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
-            </mesh>
-            {/* Docking Target Ring */}
-            <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[0.025, 0.038, 16]} />
-              <meshBasicMaterial
-                color={activeIncoming ? "#FFBF00" : "#00FF66"}
-                transparent
-                opacity={0.85}
-                side={THREE.DoubleSide}
-              />
-            </mesh>
-            {/* Approach Guide Micro-Lights */}
-            <mesh position={[0.032, 0.015, 0]}>
-              <sphereGeometry args={[0.005, 8, 8]} />
-              <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
-            </mesh>
-            <mesh position={[-0.032, 0.015, 0]}>
-              <sphereGeometry args={[0.005, 8, 8]} />
-              <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
-            </mesh>
-          </group>
-        ))}
+          { id: "B1", pos: [0.38, 0, 0], rot: [0, 0, -Math.PI / 2], normal: [1, 0, 0] },
+          { id: "B2", pos: [-0.38, 0, 0], rot: [0, 0, Math.PI / 2], normal: [-1, 0, 0] },
+          { id: "B3", pos: [0, 0, 0.38], rot: [Math.PI / 2, 0, 0], normal: [0, 0, 1] },
+          { id: "B4", pos: [0, 0, -0.38], rot: [-Math.PI / 2, 0, 0], normal: [0, 0, -1] }
+        ].map((berth) => {
+          const assignedDrone = drones.find((d) => d.berthId === berth.id);
+          const isDocked = assignedDrone && (assignedDrone.status === "idle" || assignedDrone.subStatus === "docked");
+          const isIncoming = assignedDrone && (assignedDrone.status === "returning" || assignedDrone.subStatus === "docking");
+          const berthColor = isDocked ? "#00FF66" : isIncoming ? "#FFBF00" : "#00FFFF";
+
+          return (
+            <group
+              key={berth.id}
+              position={berth.pos as [number, number, number]}
+              rotation={berth.rot as [number, number, number]}
+            >
+              {/* Magnetic Mooring Cradle Base */}
+              <mesh>
+                <cylinderGeometry args={[0.048, 0.054, 0.024, 12]} />
+                <meshStandardMaterial color="#1e293b" metalness={0.92} roughness={0.18} />
+              </mesh>
+
+              {/* Docking Target Ring */}
+              <mesh position={[0, 0.014, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0.026, 0.040, 16]} />
+                <meshBasicMaterial
+                  color={berthColor}
+                  transparent
+                  opacity={isIncoming ? 0.95 : 0.8}
+                  side={THREE.DoubleSide}
+                />
+              </mesh>
+
+              {/* Approach Guide Micro-Lights */}
+              <mesh position={[0.034, 0.016, 0]}>
+                <sphereGeometry args={[0.005, 8, 8]} />
+                <meshBasicMaterial color={berthColor} />
+              </mesh>
+              <mesh position={[-0.034, 0.016, 0]}>
+                <sphereGeometry args={[0.005, 8, 8]} />
+                <meshBasicMaterial color={berthColor} />
+              </mesh>
+
+              {/* Approach Alignment Guide Cone (Projected outward when drone is returning) */}
+              {isIncoming && (
+                <group position={[0, 0.12, 0]}>
+                  <mesh>
+                    <coneGeometry args={[0.045, 0.20, 12, 1, true]} />
+                    <meshBasicMaterial
+                      color="#FFBF00"
+                      transparent
+                      opacity={0.35}
+                      side={THREE.DoubleSide}
+                      toneMapped={false}
+                    />
+                  </mesh>
+                </group>
+              )}
+
+              {/* Anti-collision Strobe Beacon at Outer Spoke Tip */}
+              <mesh position={[0, 0.028, 0]}>
+                <sphereGeometry args={[0.004, 6, 6]} />
+                <meshBasicMaterial color="#FF0044" />
+              </mesh>
+            </group>
+          );
+        })}
       </group>
 
-      {/* 5. Underside Salvage De-Orbit & Smelting Intake Chute (anchored flush to cylinder bottom at y = -0.21) */}
+      {/* 6. Underside Salvage De-Orbit & Smelting Intake Chute with Electromagnetic Vortex (y = -0.21) */}
       <group position={[0, -0.21, 0]}>
-        {/* Inverted Conical Smelting Funnel */}
+        {/* Heavy Smelting Funnel Cowling with 4 Cooling Fins */}
         <mesh position={[0, -0.06, 0]} rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.15, 0.12, 16, 1, true]} />
+          <coneGeometry args={[0.16, 0.14, 16, 1, true]} />
           <meshStandardMaterial
             color="#334155"
-            metalness={0.85}
-            roughness={0.25}
+            metalness={0.88}
+            roughness={0.22}
             side={THREE.DoubleSide}
           />
         </mesh>
-        {/* Electromagnetic Containment Ring */}
-        <mesh position={[0, -0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.155, 0.014, 8, 32]} />
+        {[0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2].map((angle, idx) => (
+          <mesh key={idx} position={[0, -0.06, 0]} rotation={[0, angle, 0]}>
+            <boxGeometry args={[0.34, 0.12, 0.008]} />
+            <meshStandardMaterial color="#475569" metalness={0.9} roughness={0.25} />
+          </mesh>
+        ))}
+
+        {/* 3-Tier Multi-Frequency Electromagnetic Containment Rings */}
+        <mesh position={[0, -0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.13, 0.010, 8, 32]} />
           <meshBasicMaterial color="#00FFFF" toneMapped={false} />
         </mesh>
-        {/* Pulsing Processing Field Beam */}
-        <mesh ref={intakePulseRef} position={[0, -0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.145, 24]} />
+        <mesh position={[0, -0.10, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.165, 0.014, 8, 32]} />
           <meshBasicMaterial
-            color={activeIncoming ? "#00FF66" : "#00FFFF"}
+            color={isSmeltingActive ? "#FFAA00" : "#00FFFF"}
+            toneMapped={false}
+          />
+        </mesh>
+        <mesh position={[0, -0.16, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.185, 0.012, 8, 32]} />
+          <meshBasicMaterial
+            color={isSmeltingActive ? "#FF5500" : "#00FFCC"}
+            toneMapped={false}
+          />
+        </mesh>
+
+        {/* Pulsing Processing Field Beam */}
+        <mesh ref={intakePulseRef} position={[0, -0.14, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.155, 24]} />
+          <meshBasicMaterial
+            color={isSmeltingActive ? "#FFAA00" : "#00FFFF"}
             transparent
             opacity={0.7}
             side={THREE.DoubleSide}
           />
         </mesh>
-        {/* Core Processing Light */}
+
+        {/* High-Intensity Core Smelting Plasma Flash */}
         <pointLight
-          color={activeIncoming ? "#00FF66" : "#00FFFF"}
-          intensity={2.2}
-          distance={1.8}
+          ref={smeltingFlashRef}
+          color={isSmeltingActive ? "#FF7700" : "#00FFFF"}
+          intensity={isSmeltingActive ? 5.5 : 2.2}
+          distance={2.4}
         />
       </group>
 
       {/* 7. Hover Shield Bubble */}
       {hovered && (
         <mesh>
-          <sphereGeometry args={[0.62, 24, 24]} />
+          <sphereGeometry args={[0.64, 24, 24]} />
           <meshBasicMaterial
             color="#00FFFF"
             transparent
-            opacity={0.12}
+            opacity={0.14}
             wireframe
           />
         </mesh>
@@ -283,7 +462,7 @@ function OrbitalRecoveryStation({
 
       {/* 8. Invisible Raycasting Click Hitbox */}
       <mesh>
-        <sphereGeometry args={[0.58, 16, 16]} />
+        <sphereGeometry args={[0.60, 16, 16]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>
@@ -468,7 +647,7 @@ function DroneMesh({
       }
     } else {
       // 3. Docked at Station Berths: Synchronize with station ring rotation
-      const ringAngle = -clock.elapsedTime * 0.12;
+      const ringAngle = getStationRingAngle(clock.elapsedTime);
       const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
       groupRef.current.position.set(berthPos[0], berthPos[1], berthPos[2]);
 
@@ -1173,7 +1352,7 @@ function OrbitalScene() {
       return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
     }
     if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
-      const ringAngle = -((Date.now() / 1000) * 0.12);
+      const ringAngle = getStationRingAngle(Date.now() / 1000);
       return getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
     }
     return drone.position;
