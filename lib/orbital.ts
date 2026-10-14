@@ -198,9 +198,9 @@ export interface StationOrbitalBasis {
 }
 
 // Generates deterministic Keplerian orbital plane and angular rate for the Recovery Depot (DEPOT-01)
-// Starting position: [0.0, 1.9, 1.8] (~2.617 radius, LEO/MEO inclined orbit)
+// Starting position: [0.0, 2.7, 2.7] (~3.818 radius, High Orbital Staging Gateway overlooking debris field)
 export function getStationOrbitalBasis(depot?: { position?: [number, number, number] }): StationOrbitalBasis {
-  const p0 = new THREE.Vector3(...(depot?.position || [0.0, 1.9, 1.8]));
+  const p0 = new THREE.Vector3(...(depot?.position || [0.0, 2.7, 2.7]));
   const radius = p0.length();
   const u = p0.clone().normalize();
 
@@ -213,8 +213,8 @@ export function getStationOrbitalBasis(depot?: { position?: [number, number, num
   v.normalize();
   const normal = new THREE.Vector3().crossVectors(u, v).normalize();
 
-  // Angular rate ~0.052 rad/s (graceful full orbit every ~120s)
-  const omega = 0.052;
+  // Keplerian angular rate for high orbit ~0.038 rad/s (graceful full orbit every ~165s)
+  const omega = 0.038;
 
   return {
     radius,

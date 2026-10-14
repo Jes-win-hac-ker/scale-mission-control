@@ -106,7 +106,7 @@ export type CommandLog = {
 
 export const RECOVERY_DEPOT: RecoveryDepot = {
   id: "DEPOT-01",
-  position: [0.0, 1.9, 1.8]
+  position: [0.0, 2.7, 2.7]
 };
 
 export type FocusedEntity = {
@@ -234,7 +234,7 @@ const rawDebris = [
     position: [-0.9, 2.4, 1.1] as [number, number, number],
     mass: 280,
     value: 3600000,
-    material: "Carbon-Composite Strut",
+    material: "Titanium Shielding Shard",
     status: "available" as DebrisStatus,
     assignedDroneId: null
   },
@@ -244,6 +244,204 @@ const rawDebris = [
     mass: 190,
     value: 2900000,
     material: "Reaction Wheel Core",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-011",
+    position: [-1.4, 1.6, 2.1] as [number, number, number],
+    mass: 220,
+    value: 3400000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-012",
+    position: [2.1, -1.5, 0.9] as [number, number, number],
+    mass: 440,
+    value: 5600000,
+    material: "Spent Rocket Booster Stage",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-013",
+    position: [-1.1, -1.7, 2.0] as [number, number, number],
+    mass: 85,
+    value: 1650000,
+    material: "Ferrous Meteorite Shard",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-014",
+    position: [1.7, 2.2, -1.2] as [number, number, number],
+    mass: 310,
+    value: 4200000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-015",
+    position: [-2.4, -0.8, -1.6] as [number, number, number],
+    mass: 175,
+    value: 2600000,
+    material: "Aluminium Fairing & Thrust Ring",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-016",
+    position: [0.6, -2.2, -1.8] as [number, number, number],
+    mass: 130,
+    value: 2400000,
+    material: "Chondrite Meteorite Fragment",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-017",
+    position: [-2.0, 1.8, -1.0] as [number, number, number],
+    mass: 260,
+    value: 3900000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-018",
+    position: [2.8, 0.8, -0.6] as [number, number, number],
+    mass: 490,
+    value: 6100000,
+    material: "Spent Rocket Booster Stage",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-019",
+    position: [-0.5, 2.7, 0.8] as [number, number, number],
+    mass: 210,
+    value: 3150000,
+    material: "Titanium Shielding Shard",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-020",
+    position: [1.5, -2.3, 1.1] as [number, number, number],
+    mass: 295,
+    value: 4100000,
+    material: "Reaction Wheel Core",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-021",
+    position: [-1.8, -1.3, -2.1] as [number, number, number],
+    mass: 185,
+    value: 2850000,
+    material: "Aluminium Fairing & Thrust Ring",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-022",
+    position: [2.3, 1.2, 1.7] as [number, number, number],
+    mass: 360,
+    value: 4700000,
+    material: "Nickel-Cadmium Battery Unit",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-023",
+    position: [-2.7, -0.4, 1.0] as [number, number, number],
+    mass: 155,
+    value: 2300000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-024",
+    position: [0.9, -1.6, -2.4] as [number, number, number],
+    mass: 510,
+    value: 6400000,
+    material: "Spent Rocket Booster Stage",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-025",
+    position: [2.4, -1.8, -0.8] as [number, number, number],
+    mass: 110,
+    value: 1950000,
+    material: "Ferrous Meteorite Shard",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-026",
+    position: [-1.2, 2.5, -1.3] as [number, number, number],
+    mass: 230,
+    value: 3500000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-027",
+    position: [1.3, 1.9, 2.2] as [number, number, number],
+    mass: 275,
+    value: 3750000,
+    material: "Reaction Wheel Core",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-028",
+    position: [-2.5, 1.3, 1.3] as [number, number, number],
+    mass: 195,
+    value: 3100000,
+    material: "Titanium Shielding Shard",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-029",
+    position: [1.8, -2.4, -0.7] as [number, number, number],
+    mass: 340,
+    value: 4600000,
+    material: "Defunct Solar Array",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-030",
+    position: [-0.7, -1.9, 2.3] as [number, number, number],
+    mass: 165,
+    value: 2550000,
+    material: "Aluminium Fairing & Thrust Ring",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-031",
+    position: [2.6, 1.1, -1.4] as [number, number, number],
+    mass: 120,
+    value: 2150000,
+    material: "Chondrite Meteorite Fragment",
+    status: "available" as DebrisStatus,
+    assignedDroneId: null
+  },
+  {
+    id: "DEB-032",
+    position: [-2.1, -2.1, 0.9] as [number, number, number],
+    mass: 430,
+    value: 5400000,
+    material: "Spent Rocket Booster Stage",
     status: "available" as DebrisStatus,
     assignedDroneId: null
   }
@@ -263,10 +461,10 @@ const initialDrones: Drone[] = [
   {
     id: "DRONE-01",
     berthId: "B1",
-    position: [0.38, 1.9, 1.8],
+    position: [0.38, 2.7, 2.7],
     status: "idle",
     subStatus: "docked",
-    fuel: 95,
+    fuel: 100,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -274,10 +472,10 @@ const initialDrones: Drone[] = [
   {
     id: "DRONE-02",
     berthId: "B2",
-    position: [-0.38, 1.9, 1.8],
+    position: [-0.38, 2.7, 2.7],
     status: "idle",
     subStatus: "docked",
-    fuel: 88,
+    fuel: 100,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -285,10 +483,10 @@ const initialDrones: Drone[] = [
   {
     id: "DRONE-03",
     berthId: "B3",
-    position: [0.0, 1.9, 2.18],
+    position: [0.0, 2.7, 3.08],
     status: "idle",
     subStatus: "docked",
-    fuel: 82,
+    fuel: 100,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -296,10 +494,10 @@ const initialDrones: Drone[] = [
   {
     id: "DRONE-04",
     berthId: "B4",
-    position: [0.0, 1.9, 1.42],
+    position: [0.0, 2.7, 2.32],
     status: "idle",
     subStatus: "docked",
-    fuel: 75,
+    fuel: 100,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -307,10 +505,10 @@ const initialDrones: Drone[] = [
   {
     id: "DRONE-05",
     berthId: "STAGING",
-    position: [0.0, 2.45, 1.8],
+    position: [0.0, 3.25, 2.7],
     status: "idle",
     subStatus: "docked",
-    fuel: 85,
+    fuel: 100,
     payload: 0,
     targetId: null,
     speed: 1.2
@@ -369,7 +567,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     {
       id: "init-2",
       timestamp: "00:00:00",
-      message: `DEPOT-01 ISRU SMELTER ANCHORED AT [0.0, 1.9, 1.8]`,
+      message: `DEPOT-01 ISRU SMELTER ANCHORED AT [0.0, 2.7, 2.7] // HIGH ORBITAL GATEWAY (R = 3.82)`,
       tone: "info"
     }
   ],
@@ -440,39 +638,38 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         const distDroneDebris = distance(droneLaunchPos, currentDebrisPos);
         const fuelCost = calculateFuelBurn(distDroneDebris, distDebrisDepot, target.mass);
 
-        if (drone.fuel >= fuelCost) {
-          const threat = target.threatIndex || calculateKesslerThreat(target);
-          const valNorm = target.value / 1_000_000;
-          let score = fuelCost;
+        // Fuel constraint removed: all idle drones are operational and unconstrained
+        const threat = target.threatIndex || calculateKesslerThreat(target);
+        const valNorm = target.value / 1_000_000;
+        let score = fuelCost;
 
-          switch (state.swarmStrategy) {
-            case "min_delta_v":
-              score = fuelCost * 10;
-              break;
-            case "max_yield":
-              score = (fuelCost / Math.max(0.1, valNorm)) * 10;
-              break;
-            case "kessler_defense":
-              score = (fuelCost / Math.max(1, threat)) * 50;
-              break;
-            case "balanced":
-            default:
-              score = (fuelCost / (Math.sqrt(Math.max(0.1, valNorm)) * Math.sqrt(threat))) * 25;
-              break;
-          }
+        switch (state.swarmStrategy) {
+          case "min_delta_v":
+            score = fuelCost * 10;
+            break;
+          case "max_yield":
+            score = (fuelCost / Math.max(0.1, valNorm)) * 10;
+            break;
+          case "kessler_defense":
+            score = (fuelCost / Math.max(1, threat)) * 50;
+            break;
+          case "balanced":
+          default:
+            score = (fuelCost / (Math.sqrt(Math.max(0.1, valNorm)) * Math.sqrt(threat))) * 25;
+            break;
+        }
 
-          if (score < lowestScore) {
-            lowestScore = score;
-            bestDrone = drone;
-            chosenFuelCost = fuelCost;
-          }
+        if (score < lowestScore) {
+          lowestScore = score;
+          bestDrone = drone;
+          chosenFuelCost = fuelCost;
         }
       }
     }
 
     // If no drone is available, show warning in UI
     if (!bestDrone) {
-      const warningText = "Propellant insufficient for selected orbital trajectory.";
+      const warningText = "All extraction drones are currently deployed or active.";
       set({ warning: warningText });
       get().addLog(`WARNING: ${warningText}`, "warning");
       return false;
@@ -512,7 +709,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     // Protocol Step 1: Assign drone to debris, set drone status to "intercepting", set debris to "targeted"
     get().addLog(`GO-FETCH ISSUED // TARGET: ${target.id} // THREAT: ${target.threatIndex}/100`, "action");
     get().addLog(
-      `${droneId} [${bestDrone.berthId}] UNMOORING FROM ORBITING DEPOT // RENDEZVOUS SOLVED // ETA: ${interceptDurationSec.toFixed(1)}s // Δv: ${dvTotal.toLocaleString()} m/s // BURN: ${chosenFuelCost} kg`,
+      `${droneId} [${bestDrone.berthId}] UNMOORING FROM ORBITING DEPOT // RENDEZVOUS SOLVED // ETA: ${interceptDurationSec.toFixed(1)}s // Δv: ${dvTotal.toLocaleString()} m/s // PROPULSION: UNCONSTRAINED`,
       "action"
     );
 
@@ -674,15 +871,6 @@ export const useMissionStore = create<MissionState>((set, get) => ({
               const liveStandOffPos = getSmeltingStandOffPosition(smeltSimTime);
 
               set((current) => {
-                const thisDrone = current.drones.find((d) => d.id === droneId);
-                const baseFuel = thisDrone
-                  ? Math.max(0, Math.round((thisDrone.fuel - chosenFuelCost) * 10) / 10)
-                  : 0;
-
-                // In-situ propellant recycling
-                const refuelBonus = Math.min(30, Math.round(propellantKg * 0.75));
-                const newFuel = Math.min(100, Math.round((baseFuel + refuelBonus) * 10) / 10);
-
                 return {
                   totalRecoveredMass: current.totalRecoveredMass + target.mass,
                   totalRecoveredValue: current.totalRecoveredValue + target.value,
@@ -711,7 +899,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                           status: "recovered",
                           subStatus: "docking",
                           position: liveStandOffPos,
-                          fuel: newFuel,
+                          fuel: 100,
                           targetId: null
                         }
                       : d
@@ -751,7 +939,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
     const idleDrones = state.drones.filter((d) => d.status === "idle");
     if (idleDrones.length === 0) {
-      const warningText = "No available drone for GO-FETCH command.";
+      const warningText = "All extraction drones currently deployed or active.";
       set({ warning: warningText });
       get().addLog(`WARNING: ${warningText}`, "warning");
       return;
@@ -768,7 +956,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     );
 
     if (optimalMatches.length === 0) {
-      const warningText = "Propellant reserves insufficient for optimal multi-target swarm dispatch.";
+      const warningText = "All extraction drones currently deployed or active.";
       set({ warning: warningText });
       get().addLog(`WARNING: ${warningText}`, "warning");
       return;

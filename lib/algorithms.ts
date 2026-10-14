@@ -106,7 +106,8 @@ export function solveHungarianMatching(
   depotPos: [number, number, number],
   strategy: SwarmStrategy
 ): { droneId: string; targetId: string; cost: number }[] {
-  const idleDrones = drones.filter((d) => d.status === "idle" && d.fuel >= 5);
+  // Fuel constraint removed: all idle drones are fully operational and unconstrained
+  const idleDrones = drones.filter((d) => d.status === "idle");
   const availableDebris = debrisList.filter((d) => d.status === "available");
 
   if (idleDrones.length === 0 || availableDebris.length === 0) {
@@ -127,12 +128,6 @@ export function solveHungarianMatching(
       const distOut = distance(drone.position, target.position);
       const distIn = distance(target.position, depotPos);
       const fuelCost = calculateFuelBurn(distOut, distIn, target.mass);
-
-      // Infeasible if drone doesn't have sufficient fuel
-      if (drone.fuel < fuelCost) {
-        costMatrix[i][j] = 1e8;
-        continue;
-      }
 
       const threat = calculateKesslerThreat(target);
       const valueNorm = target.value / 1_000_000; // in Millions

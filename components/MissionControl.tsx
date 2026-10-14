@@ -734,7 +734,7 @@ export default function MissionControl() {
                   </div>
                   <div className="meta-cell">
                     <span className="cell-label">EST. PROP. BURN</span>
-                    <strong>{estimatedRecoveryFuel} kg</strong>
+                    <strong className="text-cyan">{estimatedRecoveryFuel} kg <span className="text-[9px] text-slate-400 font-normal">(UNCONSTRAINED)</span></strong>
                   </div>
                   <div className="meta-cell">
                     <span className="cell-label">ASSIGNED UNIT</span>
@@ -1023,32 +1023,19 @@ export default function MissionControl() {
                   </span>
                 </div>
 
-                {/* Fuel Gauge */}
+                {/* Propulsion Reserve (Fuel constraint removed - Unlimited Reserves) */}
                 <div className="fuel-gauge">
                   <div className="fuel-labels">
-                    <span>FUEL RESERVE</span>
-                    <b
-                      className={
-                        drone.fuel < 20
-                          ? "text-crimson"
-                          : drone.fuel < 40
-                          ? "text-amber"
-                          : "text-cyan"
-                      }
-                    >
-                      {drone.fuel}%
+                    <span>PROPULSION</span>
+                    <b className="text-cyan font-bold">
+                      {drone.fuel}% · UNCONSTRAINED
                     </b>
                   </div>
                   <div className="fuel-track">
                     <span
                       style={{
                         width: `${drone.fuel}%`,
-                        backgroundColor:
-                          drone.fuel < 20
-                            ? "#FF0033"
-                            : drone.fuel < 40
-                            ? "#FFBF00"
-                            : "#00FFFF"
+                        backgroundColor: "#00FFFF"
                       }}
                     />
                   </div>
