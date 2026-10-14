@@ -62,6 +62,8 @@ export default function MissionControl() {
     drones,
     depot,
     selectedDebrisId,
+    focusedEntity,
+    focusEntity,
     totalRecoveredMass,
     totalRecoveredValue,
     missionStartedAt,
@@ -210,7 +212,13 @@ export default function MissionControl() {
           </div>
 
           {/* Recovery Depot Status */}
-          <div className="depot-footer">
+          <div
+            className={`depot-footer cursor-pointer transition-all ${
+              focusedEntity.type === "depot" ? "border-cyan bg-cyan/10" : ""
+            }`}
+            onClick={() => focusEntity("depot", "DEPOT-01")}
+            title="Click to focus camera on DEPOT-01"
+          >
             <div className="depot-header">
               <span className="depot-dot" />
               <strong>{depot.id} (RECOVERY DEPOT)</strong>
@@ -229,9 +237,25 @@ export default function MissionControl() {
         <div className="center-console">
           <div className="console-top-row">
             <div className="scene-label">
-              <span className="live-dot" /> LIVE ORBITAL FEED // LEO 408.2 KM
+              <span className="live-dot" /> LIVE ORBITAL FEED //{" "}
+              {focusedEntity.type === "earth" ? (
+                "LEO 408.2 KM // ORBIT OVERVIEW"
+              ) : (
+                <span className="text-cyan font-bold">
+                  FOCUS: {focusedEntity.type.toUpperCase()}{" "}
+                  {focusedEntity.id ? `[${focusedEntity.id}]` : ""}
+                </span>
+              )}
             </div>
             <div className="scene-controls" aria-label="Orbital camera controls">
+              <button
+                onClick={() => focusEntity("earth")}
+                title="Reset Camera to Orbit Overview"
+                className="reset-btn"
+                aria-label="Reset Camera to Earth Orbit"
+              >
+                ⊙
+              </button>
               <button
                 onClick={resetSimulation}
                 title="Reset Simulation"
@@ -363,7 +387,16 @@ export default function MissionControl() {
 
           <div className="drone-list">
             {drones.map((drone) => (
-              <div key={drone.id} className="drone-row">
+              <div
+                key={drone.id}
+                className={`drone-row cursor-pointer transition-all ${
+                  focusedEntity.type === "drone" && focusedEntity.id === drone.id
+                    ? "border-cyan bg-cyan/10"
+                    : ""
+                }`}
+                onClick={() => focusEntity("drone", drone.id)}
+                title={`Click to focus camera on ${drone.id}`}
+              >
                 <div className="drone-heading">
                   <div className="flex items-center">
                     <span

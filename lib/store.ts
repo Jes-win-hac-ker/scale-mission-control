@@ -59,6 +59,11 @@ export const RECOVERY_DEPOT: RecoveryDepot = {
   position: [0.0, 1.9, 1.8]
 };
 
+export type FocusedEntity = {
+  type: "debris" | "drone" | "depot" | "earth";
+  id?: string;
+};
+
 // Euclidean 3D distance
 export function distance(
   a: [number, number, number],
@@ -247,6 +252,7 @@ type MissionState = {
   drones: Drone[];
   depot: RecoveryDepot;
   selectedDebrisId: string;
+  focusedEntity: FocusedEntity;
   missionStartedAt: number;
   totalRecoveredMass: number;
   totalRecoveredValue: number;
@@ -254,6 +260,7 @@ type MissionState = {
   warning: string | null;
 
   selectDebris: (id: string) => void;
+  focusEntity: (type: FocusedEntity["type"], id?: string) => void;
   clearWarning: () => void;
   addLog: (message: string, tone?: CommandLog["tone"]) => void;
   goFetch: (debrisId?: string) => boolean;
@@ -266,6 +273,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   drones: initialDrones,
   depot: RECOVERY_DEPOT,
   selectedDebrisId: initialDebris[0].id,
+  focusedEntity: { type: "earth" },
   missionStartedAt: Date.now(),
   totalRecoveredMass: 0,
   totalRecoveredValue: 0,
@@ -285,7 +293,16 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   ],
   warning: null,
 
-  selectDebris: (id: string) => set({ selectedDebrisId: id }),
+  selectDebris: (id: string) =>
+    set({ selectedDebrisId: id, focusedEntity: { type: "debris", id } }),
+
+  focusEntity: (type: FocusedEntity["type"], id?: string) => {
+    if (type === "debris" && id) {
+      set({ selectedDebrisId: id, focusedEntity: { type: "debris", id } });
+    } else {
+      set({ focusedEntity: { type, id } });
+    }
+  },
 
   clearWarning: () => set({ warning: null }),
 
@@ -547,6 +564,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       debris: initialDebris,
       drones: initialDrones,
       selectedDebrisId: initialDebris[0].id,
+      focusedEntity: { type: "earth" },
       totalRecoveredMass: 0,
       totalRecoveredValue: 0,
       warning: null,

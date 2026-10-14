@@ -1,7 +1,7 @@
 "use client";
 
 import { Line, OrbitControls, Stars, useGLTF } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -34,6 +34,7 @@ function OrbitalRecoveryStation({
   const addLog = useMissionStore((state) => state.addLog);
   const totalRecoveredMass = useMissionStore((state) => state.totalRecoveredMass);
   const totalRecoveredValue = useMissionStore((state) => state.totalRecoveredValue);
+  const focusEntity = useMissionStore((state) => state.focusEntity);
 
   // Check if any drone is currently returning or approaching depot
   const activeIncoming = useMemo(() => {
@@ -58,6 +59,7 @@ function OrbitalRecoveryStation({
 
   const handleStationClick = (e: any) => {
     e.stopPropagation();
+    focusEntity("depot", "DEPOT-01");
     const valString = (totalRecoveredValue / 1_000_000).toFixed(2);
     addLog(
       `DEPOT-01 STATUS // ORBITAL RECOVERY HUB // STORED MASS: ${totalRecoveredMass} kg // SALVAGE VALUE: $${valString}M // 4 BERTHS ONLINE`,
@@ -323,6 +325,7 @@ function DroneMesh({
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
   const debrisList = useMissionStore((state) => state.debris);
+  const focusEntity = useMissionStore((state) => state.focusEntity);
 
   // Status-based color mapping per prompt requirements:
   // - Idle drones: cyan
@@ -399,13 +402,14 @@ function DroneMesh({
       position={drone.position}
       onClick={(e) => {
         e.stopPropagation();
+        focusEntity("drone", drone.id);
         if (drone.targetId && onSelectTarget) {
           onSelectTarget(drone.targetId);
         }
       }}
       onPointerOver={(e) => {
         e.stopPropagation();
-        if (drone.targetId) document.body.style.cursor = "pointer";
+        document.body.style.cursor = "pointer";
       }}
       onPointerOut={() => {
         document.body.style.cursor = "default";
@@ -906,7 +910,11 @@ function ActiveTrajectory({
 
 function OrbitalScene() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const { debris, drones, depot, selectedDebrisId, selectDebris } = useMissionStore();
+  const { debris, drones, depot, selectedDebrisId, selectDebris, focusedEntity, focusEntity } = useMissionStore();
+  const { camera } = useThree();
+
+  const prevEntityKeyRef = useRef<string>("earth");
+  const isTransitioningRef = useRef<boolean>(false);
 
   useEffect(() => {
     const handleZoom = (event: Event) => {
@@ -916,9 +924,9 @@ function OrbitalScene() {
 
       const distanceVal = controls.object.position.distanceTo(controls.target);
       const nextDistance = THREE.MathUtils.clamp(
-        distanceVal + (direction === "in" ? -0.65 : 0.65),
-        4.5,
-        9
+        distanceVal + (direction === "in" ? -0.4 : 0.4),
+        0.35,
+        16
       );
       const directionVector = controls.object.position.clone().sub(controls.target).normalize();
       controls.object.position.copy(controls.target).add(directionVector.multiplyScalar(nextDistance));
@@ -928,6 +936,72 @@ function OrbitalScene() {
     window.addEventListener("scale:zoom", handleZoom);
     return () => window.removeEventListener("scale:zoom", handleZoom);
   }, []);
+
+  // Frame-by-frame camera focus & tracking loop
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    // Calculate desired 3D focus coordinate and optimal framing distance
+    const targetVec = new THREE.Vector3(0, 0, 0);
+    let targetDistance = 6.5;
+
+    if (focusedEntity.type === "debris") {
+      const item = debris.find((d) => d.id === focusedEntity.id);
+      if (item) {
+        targetVec.set(item.position[0], item.position[1], item.position[2]);
+        targetDistance = 0.85;
+      }
+    } else if (focusedEntity.type === "drone") {
+      const drone = drones.find((d) => d.id === focusedEntity.id);
+      if (drone) {
+        let pos = drone.position;
+        if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+          const elapsed = (Date.now() - drone.flight.startTime) / 1000;
+          const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+          const eased = easeInOutQuad(progress);
+          pos = [
+            THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
+            THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
+            THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
+          ];
+        }
+        targetVec.set(pos[0], pos[1], pos[2]);
+        targetDistance = 0.55;
+      }
+    } else if (focusedEntity.type === "depot") {
+      targetVec.set(depot.position[0], depot.position[1], depot.position[2]);
+      targetDistance = 1.35;
+    }
+
+    // Detect target shift
+    const currentKey = `${focusedEntity.type}-${focusedEntity.id || "root"}`;
+    if (prevEntityKeyRef.current !== currentKey) {
+      prevEntityKeyRef.current = currentKey;
+      isTransitioningRef.current = true;
+    }
+
+    // Smoothly shift orbit pivot target
+    controls.target.lerp(targetVec, 0.08);
+
+    // During active transition, smoothly adjust distance along camera view line
+    if (isTransitioningRef.current) {
+      const currentDist = camera.position.distanceTo(controls.target);
+      const viewDir = camera.position.clone().sub(controls.target).normalize();
+      if (viewDir.lengthSq() < 0.001) {
+        viewDir.set(0, 0.2, 1).normalize();
+      }
+
+      const nextDist = THREE.MathUtils.lerp(currentDist, targetDistance, 0.08);
+      camera.position.copy(controls.target).add(viewDir.multiplyScalar(nextDist));
+
+      if (Math.abs(currentDist - targetDistance) < 0.02 && controls.target.distanceTo(targetVec) < 0.02) {
+        isTransitioningRef.current = false;
+      }
+    }
+
+    controls.update();
+  });
 
   return (
     <>
@@ -994,8 +1068,8 @@ function OrbitalScene() {
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
-        minDistance={2.5}
-        maxDistance={14}
+        minDistance={0.25}
+        maxDistance={16}
         enableDamping={true}
         dampingFactor={0.05}
       />
@@ -1004,9 +1078,15 @@ function OrbitalScene() {
 }
 
 export default function Scene() {
+  const focusEntity = useMissionStore((state) => state.focusEntity);
+
   return (
     <div className="scene-canvas">
-      <Canvas camera={{ position: [0, 1.2, 6.5], fov: 40 }} dpr={[1, 1.7]}>
+      <Canvas
+        camera={{ position: [0, 1.2, 6.5], fov: 40 }}
+        dpr={[1, 1.7]}
+        onPointerMissed={() => focusEntity("earth")}
+      >
         <Suspense fallback={null}>
           <OrbitalScene />
         </Suspense>
