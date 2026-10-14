@@ -1,6 +1,6 @@
 "use client";
 
-import { Line, OrbitControls, Stars, useGLTF, useTexture } from "@react-three/drei";
+import { Billboard, Html, Line, OrbitControls, Stars, useGLTF, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -1096,6 +1096,185 @@ function DebrisShape({
   );
 }
 
+// Aerospace Tactical Lock-On Reticle & High-Orbit Sonar Beacon
+function TacticalTargetReticle({
+  debris,
+  isTargeted,
+  isSelected,
+  assignedDrone
+}: {
+  debris: Debris;
+  isTargeted: boolean;
+  isSelected: boolean;
+  assignedDrone?: Drone;
+}) {
+  const outerGroupRef = useRef<THREE.Group>(null);
+  const innerGroupRef = useRef<THREE.Group>(null);
+  const pulseRef1 = useRef<THREE.Mesh>(null);
+  const pulseRef2 = useRef<THREE.Mesh>(null);
+
+  const primaryColor = isTargeted ? "#FFBF00" : "#00FFFF";
+  const secondaryColor = isTargeted ? "#FFAA00" : "#38BDF8";
+
+  // 4 Corner L-Brackets surrounding the targeted debris
+  const cornerSegments = useMemo(() => {
+    const s = 0.11;
+    const leg = 0.04;
+    return [
+      // Top-Right
+      [[s - leg, s, 0], [s, s, 0], [s, s - leg, 0]],
+      // Top-Left
+      [[-s + leg, s, 0], [-s, s, 0], [-s, s - leg, 0]],
+      // Bottom-Left
+      [[-s + leg, -s, 0], [-s, -s, 0], [-s, -s + leg, 0]],
+      // Bottom-Right
+      [[s - leg, -s, 0], [s, -s, 0], [s, -s + leg, 0]],
+    ] as [number, number, number][][];
+  }, []);
+
+  // 4 Cardinal precision tick marks (N, S, E, W)
+  const cardinalTicks = useMemo(() => {
+    const r1 = 0.058;
+    const r2 = 0.078;
+    return [
+      [[0, r1, 0], [0, r2, 0]],
+      [[0, -r1, 0], [0, -r2, 0]],
+      [[r1, 0, 0], [r2, 0, 0]],
+      [[-r1, 0, 0], [-r2, 0, 0]],
+    ] as [number, number, number][][];
+  }, []);
+
+  useFrame(({ clock }) => {
+    // Continuous dual-rate counter-rotation
+    if (outerGroupRef.current) {
+      outerGroupRef.current.rotation.z = clock.elapsedTime * 0.7;
+    }
+    if (innerGroupRef.current) {
+      innerGroupRef.current.rotation.z = -clock.elapsedTime * 1.1;
+    }
+
+    // Radiating Sonar/Radar Beacon Rings expanding into deep space
+    if (pulseRef1.current) {
+      const p1 = (clock.elapsedTime * 0.75) % 1.0;
+      const s1 = THREE.MathUtils.lerp(0.6, 3.4, p1);
+      pulseRef1.current.scale.setScalar(s1);
+      (pulseRef1.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - p1) * 0.85);
+    }
+    if (pulseRef2.current) {
+      const p2 = (clock.elapsedTime * 0.75 + 0.5) % 1.0;
+      const s2 = THREE.MathUtils.lerp(0.6, 3.4, p2);
+      pulseRef2.current.scale.setScalar(s2);
+      (pulseRef2.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - p2) * 0.85);
+    }
+  });
+
+  return (
+    <Billboard follow lockX={false} lockY={false} lockZ={false}>
+      {/* 1. Rotating Outer Bracket & Reticle Ring */}
+      <group ref={outerGroupRef}>
+        {cornerSegments.map((pts, i) => (
+          <Line
+            key={`corner-${i}`}
+            points={pts}
+            color={primaryColor}
+            lineWidth={2.2}
+            transparent
+            opacity={0.95}
+          />
+        ))}
+        <mesh>
+          <ringGeometry args={[0.092, 0.098, 36]} />
+          <meshBasicMaterial
+            color={secondaryColor}
+            transparent
+            opacity={0.5}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+
+      {/* 2. Counter-Rotating Inner Precision Ring & Crosshairs */}
+      <group ref={innerGroupRef}>
+        <mesh>
+          <ringGeometry args={[0.052, 0.058, 28]} />
+          <meshBasicMaterial
+            color={primaryColor}
+            transparent
+            opacity={0.8}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+        {cardinalTicks.map((pts, i) => (
+          <Line
+            key={`tick-${i}`}
+            points={pts}
+            color={primaryColor}
+            lineWidth={2.0}
+            transparent
+            opacity={0.9}
+          />
+        ))}
+      </group>
+
+      {/* 3. Expanding Sonar Pulse Rings (Visible from High Orbit) */}
+      <mesh ref={pulseRef1}>
+        <ringGeometry args={[0.07, 0.078, 36]} />
+        <meshBasicMaterial
+          color={primaryColor}
+          transparent
+          opacity={0.8}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh ref={pulseRef2}>
+        <ringGeometry args={[0.07, 0.078, 36]} />
+        <meshBasicMaterial
+          color={primaryColor}
+          transparent
+          opacity={0.8}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* 4. 3D Floating HUD Callout Badge */}
+      <Html
+        position={[0, 0.16, 0]}
+        center
+        distanceFactor={7}
+        style={{ pointerEvents: "none" }}
+      >
+        <div className="tactical-lock-hud">
+          <div className={`tactical-lock-badge ${isTargeted ? "is-targeted" : "is-selected"}`}>
+            <span className="tactical-lock-dot" />
+            <span>
+              {isTargeted
+                ? `LOCK // ${assignedDrone?.id ?? "DRONE"} EN ROUTE`
+                : "TARGET ACQUIRED"}
+            </span>
+          </div>
+          <div className="tactical-lock-subtag">
+            <span>{debris.id}</span>
+            <span>•</span>
+            <span>{debris.material.toUpperCase()}</span>
+            <span>•</span>
+            <span>{debris.mass}kg</span>
+            {isTargeted && (
+              <>
+                <span>•</span>
+                <span style={{ color: "#ffbf00" }}>THREAT {debris.threatIndex.toFixed(1)}</span>
+              </>
+            )}
+          </div>
+        </div>
+      </Html>
+    </Billboard>
+  );
+}
+
 // Debris Visualization & Animation
 function DebrisMesh({
   debris,
@@ -1287,28 +1466,14 @@ function DebrisMesh({
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Target Reticle for Selected Debris */}
-      {selected && (
-        <group>
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.08, 0.095, 32]} />
-            <meshBasicMaterial
-              color="#FFBF00"
-              transparent
-              opacity={0.9}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-          <mesh>
-            <ringGeometry args={[0.08, 0.095, 32]} />
-            <meshBasicMaterial
-              color="#FFBF00"
-              transparent
-              opacity={0.7}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-        </group>
+      {/* Tactical Aerospace Lock-On Reticle (Targeted by Drone or Selected by User) */}
+      {(debris.status === "targeted" || selected) && (
+        <TacticalTargetReticle
+          debris={debris}
+          isTargeted={debris.status === "targeted"}
+          isSelected={selected}
+          assignedDrone={assignedDrone}
+        />
       )}
     </group>
   );
@@ -1546,13 +1711,129 @@ function ActiveTrajectory({
   );
 }
 
-// Faint Orbit Trace Ring for Satellites & Space Debris
+// Dynamic Intercept Guidance Laser Vector with Animated Photon Pulses
+function InterceptGuidanceBeam({
+  drone,
+  debris
+}: {
+  drone: Drone;
+  debris: Debris;
+}) {
+  const pulseRef1 = useRef<THREE.Mesh>(null);
+  const pulseRef2 = useRef<THREE.Mesh>(null);
+  const impactRef = useRef<THREE.Mesh>(null);
+
+  const lineObject = useMemo(() => {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    const mat = new THREE.LineBasicMaterial({
+      color: "#FFBF00",
+      transparent: true,
+      opacity: 0.88,
+      linewidth: 2,
+      depthWrite: false
+    });
+    const line = new THREE.Line(geom, mat);
+    line.frustumCulled = false;
+    return line;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      lineObject.geometry.dispose();
+      (lineObject.material as THREE.Material).dispose();
+    };
+  }, [lineObject]);
+
+  useFrame(({ clock }) => {
+    // 1. Calculate live Drone position
+    let dronePos: [number, number, number] = drone.position;
+    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
+      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+      const eased = easeInOutQuad(progress);
+      dronePos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+    }
+
+    // 2. Calculate live Debris position
+    const debrisPos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
+
+    // 3. Update dynamic laser line vertices
+    const posAttr = lineObject.geometry.attributes.position as THREE.BufferAttribute;
+    if (posAttr) {
+      posAttr.setXYZ(0, dronePos[0], dronePos[1], dronePos[2]);
+      posAttr.setXYZ(1, debrisPos[0], debrisPos[1], debrisPos[2]);
+      posAttr.needsUpdate = true;
+    }
+
+    // 4. Update animated traveling photon energy pulses along guidance vector
+    const t1 = (clock.elapsedTime * 2.0) % 1.0;
+    const t2 = (clock.elapsedTime * 2.0 + 0.5) % 1.0;
+
+    if (pulseRef1.current) {
+      pulseRef1.current.position.set(
+        THREE.MathUtils.lerp(dronePos[0], debrisPos[0], t1),
+        THREE.MathUtils.lerp(dronePos[1], debrisPos[1], t1),
+        THREE.MathUtils.lerp(dronePos[2], debrisPos[2], t1)
+      );
+      const s = 0.8 + Math.sin(t1 * Math.PI) * 0.4;
+      pulseRef1.current.scale.setScalar(s);
+    }
+
+    if (pulseRef2.current) {
+      pulseRef2.current.position.set(
+        THREE.MathUtils.lerp(dronePos[0], debrisPos[0], t2),
+        THREE.MathUtils.lerp(dronePos[1], debrisPos[1], t2),
+        THREE.MathUtils.lerp(dronePos[2], debrisPos[2], t2)
+      );
+      const s = 0.8 + Math.sin(t2 * Math.PI) * 0.4;
+      pulseRef2.current.scale.setScalar(s);
+    }
+
+    // 5. Target impact ping on debris
+    if (impactRef.current) {
+      impactRef.current.position.set(debrisPos[0], debrisPos[1], debrisPos[2]);
+      const p = (clock.elapsedTime * 3.0) % 1.0;
+      impactRef.current.scale.setScalar(0.8 + p * 1.6);
+      (impactRef.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - p) * 0.85);
+    }
+  });
+
+  return (
+    <group>
+      {/* Primary Dynamic Intercept Laser Beam */}
+      <primitive object={lineObject} />
+
+      {/* High-speed Photon Energy Pulse 1 */}
+      <mesh ref={pulseRef1}>
+        <sphereGeometry args={[0.02, 12, 12]} />
+        <meshBasicMaterial color="#FFFFFF" transparent opacity={0.95} depthWrite={false} />
+      </mesh>
+
+      {/* High-speed Photon Energy Pulse 2 */}
+      <mesh ref={pulseRef2}>
+        <sphereGeometry args={[0.016, 12, 12]} />
+        <meshBasicMaterial color="#FFAA00" transparent opacity={0.9} depthWrite={false} />
+      </mesh>
+
+      {/* Target Impact Focal Ping */}
+      <mesh ref={impactRef}>
+        <sphereGeometry args={[0.035, 12, 12]} />
+        <meshBasicMaterial color="#FFBF00" wireframe transparent opacity={0.7} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
+// Keplerian Orbit Track Ring for Satellites & Space Debris, highlighted for targeted/selected debris
 function DebrisOrbitRing({
   debris,
-  selected
+  selected,
+  isTargeted
 }: {
   debris: Debris;
   selected: boolean;
+  isTargeted: boolean;
 }) {
   const points = useMemo(() => {
     return getDebrisOrbitTrackSamples(debris, 64);
@@ -1560,16 +1841,20 @@ function DebrisOrbitRing({
 
   if (debris.status === "recovered") return null;
 
+  const color = isTargeted ? "#FFBF00" : selected ? "#00FFFF" : "#38bdf8";
+  const lineWidth = isTargeted ? 2.6 : selected ? 1.8 : 0.6;
+  const opacity = isTargeted ? 0.9 : selected ? 0.75 : 0.16;
+
   return (
     <Line
       points={points}
-      color={selected ? "#FFBF00" : "#38bdf8"}
-      lineWidth={selected ? 1.4 : 0.6}
-      dashed
+      color={color}
+      lineWidth={lineWidth}
+      dashed={!isTargeted}
       dashSize={selected ? 0.08 : 0.04}
       gapSize={selected ? 0.04 : 0.08}
       transparent
-      opacity={selected ? 0.65 : 0.16}
+      opacity={opacity}
     />
   );
 }
@@ -1744,6 +2029,7 @@ function OrbitalScene() {
           key={`orbit-${item.id}`}
           debris={item}
           selected={item.id === selectedDebrisId}
+          isTargeted={item.status === "targeted"}
         />
       ))}
 
@@ -1753,7 +2039,7 @@ function OrbitalScene() {
           key={item.id}
           debris={item}
           selected={item.id === selectedDebrisId}
-          assignedDrone={drones.find((d) => d.targetId === item.id)}
+          assignedDrone={drones.find((d) => d.targetId === item.id || (item.assignedDroneId && d.id === item.assignedDroneId))}
           onClick={() => selectDebris(item.id)}
         />
       ))}
@@ -1766,6 +2052,22 @@ function OrbitalScene() {
           onSelectTarget={selectDebris}
         />
       ))}
+
+      {/* Dynamic Intercept Guidance Laser Vectors & Energy Pulses */}
+      {drones.map((drone) => {
+        if (!drone.targetId) return null;
+        if (drone.status !== "intercepting" && drone.status !== "capturing") return null;
+        const targetDebris = debris.find((item) => item.id === drone.targetId);
+        if (!targetDebris || targetDebris.status === "recovered") return null;
+
+        return (
+          <InterceptGuidanceBeam
+            key={`guidance-${drone.id}-${targetDebris.id}`}
+            drone={drone}
+            debris={targetDebris}
+          />
+        );
+      })}
 
       {/* Dynamic Curved Trajectories */}
       {drones.map((drone) => {

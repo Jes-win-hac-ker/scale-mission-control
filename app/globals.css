@@ -918,6 +918,90 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; bord
 .ticker-event { color: var(--muted); text-align: right; }
 .ticker-event span { padding: 0 8px; color: var(--amber); }
 
+/* Tactical Target Lock-On HUD Badges & Reticles */
+.tactical-lock-hud {
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate3d(-50%, -100%, 0);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.tactical-lock-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  border: 1px solid;
+}
+
+.tactical-lock-badge.is-targeted {
+  background: rgba(255, 191, 0, 0.18);
+  border-color: rgba(255, 191, 0, 0.85);
+  color: #ffbf00;
+  box-shadow: 0 0 18px rgba(255, 191, 0, 0.45);
+}
+
+.tactical-lock-badge.is-selected {
+  background: rgba(0, 255, 255, 0.16);
+  border-color: rgba(0, 255, 255, 0.85);
+  color: #00ffff;
+  box-shadow: 0 0 18px rgba(0, 255, 255, 0.45);
+}
+
+.tactical-lock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulse-beacon 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.tactical-lock-badge.is-targeted .tactical-lock-dot {
+  background: #ffbf00;
+  box-shadow: 0 0 8px #ffbf00;
+}
+
+.tactical-lock-badge.is-selected .tactical-lock-dot {
+  background: #00ffff;
+  box-shadow: 0 0 8px #00ffff;
+}
+
+.tactical-lock-subtag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(3, 7, 18, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(220, 239, 239, 0.85);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+}
+
+@keyframes pulse-beacon {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.4);
+  }
+}
+
 /* Responsive Adjustments */
 @media (max-width: 1100px) {
   .hud-grid { grid-template-columns: 270px 1fr 290px; gap: 14px; padding-inline: 14px; }
