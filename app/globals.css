@@ -1002,6 +1002,116 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; bord
   }
 }
 
+/* Differential Astrodynamics ("Where It Isn't") Telemetry & Vector HUD */
+.differential-guidance-card {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(3, 7, 18, 0.68);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.diff-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: pulse-beacon 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.diff-vector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.diff-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.diff-cell.full-width {
+  grid-column: 1 / -1;
+  background: rgba(255, 191, 0, 0.05);
+  border-color: rgba(255, 191, 0, 0.22);
+}
+
+.diff-subtext {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8.5px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.diff-deviation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.diff-vector-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  color: #edfafa;
+}
+
+/* 3D In-Scene Tactical Vector Pill */
+.tactical-lock-vector-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  background: rgba(3, 7, 18, 0.88);
+  border: 1px solid rgba(0, 255, 255, 0.4);
+  box-shadow: 0 0 14px rgba(0, 255, 255, 0.25);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.vector-label {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 7.5px;
+}
+
+.vector-val {
+  font-weight: 600;
+}
+
+.vector-sep {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.vector-range {
+  font-weight: 700;
+}
+
 /* Responsive Adjustments */
 @media (max-width: 1100px) {
   .hud-grid { grid-template-columns: 270px 1fr 290px; gap: 14px; padding-inline: 14px; }

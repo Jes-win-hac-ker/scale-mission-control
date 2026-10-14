@@ -17,6 +17,8 @@ import {
   getBerthWorldPosition,
   getDebrisOrbitalPosition,
   getDebrisOrbitTrackSamples,
+  getDifferentialVectorState,
+  getDroneWorldPosition,
   getOrbitalArcPoint,
   getOrbitalArcSamples,
   getOrbitalArcTangent,
@@ -1113,6 +1115,12 @@ function TacticalTargetReticle({
   const pulseRef1 = useRef<THREE.Mesh>(null);
   const pulseRef2 = useRef<THREE.Mesh>(null);
 
+  const posRef = useRef<HTMLSpanElement>(null);
+  const devRef = useRef<HTMLSpanElement>(null);
+  const rangeRef = useRef<HTMLSpanElement>(null);
+
+  const depot = useMissionStore((state) => state.depot);
+
   const primaryColor = isTargeted ? "#FFBF00" : "#00FFFF";
   const secondaryColor = isTargeted ? "#FFAA00" : "#38BDF8";
 
@@ -1165,6 +1173,27 @@ function TacticalTargetReticle({
       const s2 = THREE.MathUtils.lerp(0.6, 3.4, p2);
       pulseRef2.current.scale.setScalar(s2);
       (pulseRef2.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (1 - p2) * 0.85);
+    }
+
+    // Live 3D Spatial Coordinates & Differential Deviation ("Where It Isn't")
+    const livePos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
+    let observerPos = depot.position;
+    if (assignedDrone) {
+      observerPos = getDroneWorldPosition(assignedDrone, depot.position, clock.elapsedTime, [debris]);
+    }
+    const diff = getDifferentialVectorState(livePos, observerPos);
+
+    if (posRef.current) {
+      posRef.current.textContent = `X:${livePos[0] > 0 ? "+" : ""}${livePos[0].toFixed(2)} Y:${livePos[1] > 0 ? "+" : ""}${livePos[1].toFixed(2)} Z:${livePos[2] > 0 ? "+" : ""}${livePos[2].toFixed(2)}`;
+    }
+    if (devRef.current) {
+      const dxKm = Math.round(diff.deviationKm[0]);
+      const dyKm = Math.round(diff.deviationKm[1]);
+      const dzKm = Math.round(diff.deviationKm[2]);
+      devRef.current.textContent = `Δ[${dxKm > 0 ? "+" : ""}${dxKm}, ${dyKm > 0 ? "+" : ""}${dyKm}, ${dzKm > 0 ? "+" : ""}${dzKm}]km`;
+    }
+    if (rangeRef.current) {
+      rangeRef.current.textContent = `ρ:${Math.round(diff.rangeKm).toLocaleString()}km`;
     }
   });
 
@@ -1268,6 +1297,21 @@ function TacticalTargetReticle({
                 <span style={{ color: "#ffbf00" }}>THREAT {debris.threatIndex.toFixed(1)}</span>
               </>
             )}
+          </div>
+          <div className="tactical-lock-vector-pill">
+            <span className="vector-label">POS</span>
+            <span ref={posRef} className="vector-val text-cyan">
+              X:0.00 Y:0.00 Z:0.00
+            </span>
+            <span className="vector-sep">·</span>
+            <span className="vector-label">DEV</span>
+            <span ref={devRef} className="vector-val text-amber">
+              Δ[0, 0, 0]km
+            </span>
+            <span className="vector-sep">·</span>
+            <span ref={rangeRef} className="vector-range text-emerald-400">
+              -- km
+            </span>
           </div>
         </div>
       </Html>
@@ -1722,6 +1766,7 @@ function InterceptGuidanceBeam({
   const pulseRef1 = useRef<THREE.Mesh>(null);
   const pulseRef2 = useRef<THREE.Mesh>(null);
   const impactRef = useRef<THREE.Mesh>(null);
+  const depot = useMissionStore((state) => state.depot);
 
   const lineObject = useMemo(() => {
     const geom = new THREE.BufferGeometry();
@@ -1746,16 +1791,8 @@ function InterceptGuidanceBeam({
   }, [lineObject]);
 
   useFrame(({ clock }) => {
-    // 1. Calculate live Drone position
-    let dronePos: [number, number, number] = drone.position;
-    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
-      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
-      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
-      const eased = easeInOutQuad(progress);
-      dronePos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
-    }
-
-    // 2. Calculate live Debris position
+    // 1. Calculate live Drone position & Debris position
+    const dronePos = getDroneWorldPosition(drone, depot.position, clock.elapsedTime, [debris]);
     const debrisPos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
 
     // 3. Update dynamic laser line vertices
@@ -1891,26 +1928,7 @@ function OrbitalScene() {
 
   // Real-time flight position calculator for drones along curved transfer arcs and docked berths
   const getDroneRealtimePos = (drone: Drone): [number, number, number] => {
-    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
-      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
-      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
-      const eased = easeInOutQuad(progress);
-      return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
-    }
-    if (drone.status === "capturing" && drone.targetId) {
-      const target = debris.find((d) => d.id === drone.targetId);
-      if (target) {
-        return getDebrisOrbitalPosition(target, Date.now() / 1000);
-      }
-    }
-    if (drone.subStatus === "ingesting") {
-      return getSmeltingStandOffPosition(depot.position);
-    }
-    if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
-      const ringAngle = getStationRingAngle(Date.now() / 1000);
-      return getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
-    }
-    return drone.position;
+    return getDroneWorldPosition(drone, depot.position, Date.now() / 1000, debris);
   };
 
   // Frame-by-frame camera focus & dynamic follow tracking loop

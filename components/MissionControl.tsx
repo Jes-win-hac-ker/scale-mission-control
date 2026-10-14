@@ -12,6 +12,11 @@ import {
   useMissionStore
 } from "@/lib/store";
 import { calculateFuelBurn } from "@/lib/algorithms";
+import {
+  getDebrisSpatialCoordinates,
+  getDifferentialVectorState,
+  getDroneWorldPosition
+} from "@/lib/orbital";
 
 const debrisStatusTone: Record<DebrisStatus, string> = {
   available: "text-crimson border-crimson/50 bg-crimson/10",
@@ -194,7 +199,33 @@ export default function MissionControl() {
     return calculateFuelBurn(minDroneDist, distToDepot, selected.mass);
   }, [selected, depot.position, drones]);
 
-  const assignedDrone = drones.find((d) => d.targetId === selected?.id);
+  const [liveSec, setLiveSec] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveSec(Date.now() / 1000);
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const assignedDrone = useMemo(() => {
+    return drones.find(
+      (d) => d.targetId === selected?.id || (selected?.assignedDroneId && d.id === selected?.assignedDroneId)
+    );
+  }, [drones, selected]);
+
+  const targetCoords = useMemo(() => {
+    if (!selected) return null;
+    return getDebrisSpatialCoordinates(selected, liveSec);
+  }, [selected, liveSec]);
+
+  const diffState = useMemo(() => {
+    if (!selected || !targetCoords) return null;
+    let observerPos = depot.position;
+    if (assignedDrone) {
+      observerPos = getDroneWorldPosition(assignedDrone, depot.position, liveSec, debris);
+    }
+    return getDifferentialVectorState(targetCoords.scenePos, observerPos);
+  }, [selected, targetCoords, assignedDrone, depot.position, liveSec, debris]);
 
   if (!mounted) {
     return null;
@@ -603,6 +634,14 @@ export default function MissionControl() {
                         <span>{selected.mass} kg</span>
                         <span className="island-meta-sep">·</span>
                         <span>{formatMoney(selected.value)}</span>
+                        {diffState && (
+                          <>
+                            <span className="island-meta-sep">·</span>
+                            <span className="text-cyan font-mono text-[9px]">
+                              DEV: {Math.round(diffState.rangeKm).toLocaleString()} km
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -696,6 +735,76 @@ export default function MissionControl() {
                     </strong>
                   </div>
                 </div>
+
+                {/* Differential Astrodynamics & Relative Vector Telemetry ("Knowing Where It Isn't") */}
+                {targetCoords && diffState && (
+                  <div className="differential-guidance-card">
+                    <div className="diff-header">
+                      <div className="flex items-center gap-2">
+                        <span className="diff-pulse-dot" />
+                        <span className="text-[10px] font-mono tracking-wider text-cyan font-bold">
+                          DIFFERENTIAL GUIDANCE // PN RELATIVE VECTOR ESTIMATOR
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-mono text-amber tracking-wider font-semibold">
+                        {selected.status === "available"
+                          ? "PASSIVE INERTIAL TRACKING"
+                          : selected.status === "targeted"
+                          ? "CORRECTION BURN IN PROGRESS"
+                          : "ZERO-DEVIATION LOCK"}
+                      </span>
+                    </div>
+
+                    <div className="diff-vector-grid">
+                      <div className="diff-cell">
+                        <span className="cell-label">WHERE IT ISN'T (TARGET POS)</span>
+                        <strong className="text-cyan font-mono text-[11px]">
+                          X:{targetCoords.kmPos[0] > 0 ? "+" : ""}{Math.round(targetCoords.kmPos[0]).toLocaleString()} km · 
+                          Y:{targetCoords.kmPos[1] > 0 ? "+" : ""}{Math.round(targetCoords.kmPos[1]).toLocaleString()} km · 
+                          Z:{targetCoords.kmPos[2] > 0 ? "+" : ""}{Math.round(targetCoords.kmPos[2]).toLocaleString()} km
+                        </strong>
+                        <span className="diff-subtext">
+                          ALT: {Math.round(targetCoords.altitudeKm).toLocaleString()} km LEO · R: {Math.round(targetCoords.orbitalRadiusKm).toLocaleString()} km
+                        </span>
+                      </div>
+
+                      <div className="diff-cell">
+                        <span className="cell-label">WHERE IT IS (OBSERVER POS: {assignedDrone ? assignedDrone.id : "DEPOT-01"})</span>
+                        <strong className="text-emerald-400 font-mono text-[11px]">
+                          X:{diffState.observerKm[0] > 0 ? "+" : ""}{Math.round(diffState.observerKm[0]).toLocaleString()} km · 
+                          Y:{diffState.observerKm[1] > 0 ? "+" : ""}{Math.round(diffState.observerKm[1]).toLocaleString()} km · 
+                          Z:{diffState.observerKm[2] > 0 ? "+" : ""}{Math.round(diffState.observerKm[2]).toLocaleString()} km
+                        </strong>
+                        <span className="diff-subtext">
+                          REFERENCE: {assignedDrone ? `${assignedDrone.id} INERTIAL` : "ORBITAL HUB DEPOT-01"}
+                        </span>
+                      </div>
+
+                      <div className="diff-cell full-width">
+                        <div className="flex items-center justify-between">
+                          <span className="cell-label">DEVIATION VECTOR (ΔR = TARGET - OBSERVER)</span>
+                          <span className="text-amber font-mono text-[11px] font-bold">
+                            CLOSING RANGE: {Math.round(diffState.rangeKm).toLocaleString()} km
+                          </span>
+                        </div>
+                        <div className="diff-deviation-row">
+                          <span className="diff-vector-badge">
+                            ΔX: {diffState.deviationKm[0] > 0 ? "+" : ""}{Math.round(diffState.deviationKm[0]).toLocaleString()} km
+                          </span>
+                          <span className="diff-vector-badge">
+                            ΔY: {diffState.deviationKm[1] > 0 ? "+" : ""}{Math.round(diffState.deviationKm[1]).toLocaleString()} km
+                          </span>
+                          <span className="diff-vector-badge">
+                            ΔZ: {diffState.deviationKm[2] > 0 ? "+" : ""}{Math.round(diffState.deviationKm[2]).toLocaleString()} km
+                          </span>
+                          <span className="diff-vector-badge text-cyan">
+                            UNIT: [{diffState.normalizedDirection[0].toFixed(2)}, {diffState.normalizedDirection[1].toFixed(2)}, {diffState.normalizedDirection[2].toFixed(2)}]
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Real-time Extraction & Retrieval Pipeline Ribbon */}
                 {selected.status !== "available" && (

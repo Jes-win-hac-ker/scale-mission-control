@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Debris } from "./store";
+import type { Debris, Drone } from "./store";
 
 export interface OrbitalBasis {
   radius: number;
@@ -288,6 +288,117 @@ export function calculateRendezvousTrajectory(
     rendezvousPosition: finalPos,
     distance: finalDist
   };
+}
+
+// Physical Earth radius in kilometers and 3D simulation scaling constant
+export const EARTH_RADIUS_KM = 6371;
+export const EARTH_RADIUS_SCENE = 1.35;
+export const KM_PER_SCENE_UNIT = EARTH_RADIUS_KM / EARTH_RADIUS_SCENE; // ~4719.26 km/unit
+
+export interface DebrisSpatialCoordinates {
+  scenePos: [number, number, number];
+  kmPos: [number, number, number];
+  altitudeKm: number;
+  orbitalRadiusKm: number;
+}
+
+export interface DifferentialVectorState {
+  targetKm: [number, number, number];
+  observerKm: [number, number, number];
+  deviationKm: [number, number, number]; // Target (where it isn't) minus Observer (where it is)
+  rangeKm: number;
+  normalizedDirection: [number, number, number];
+}
+
+// Converts scene 3D coordinates into real-world orbital telemetry in kilometers
+export function getDebrisSpatialCoordinates(
+  debris: Debris,
+  timeSec: number
+): DebrisSpatialCoordinates {
+  const scenePos = getDebrisOrbitalPosition(debris, timeSec);
+  const kmPos: [number, number, number] = [
+    scenePos[0] * KM_PER_SCENE_UNIT,
+    scenePos[1] * KM_PER_SCENE_UNIT,
+    scenePos[2] * KM_PER_SCENE_UNIT
+  ];
+  const rScene = Math.sqrt(
+    scenePos[0] * scenePos[0] + scenePos[1] * scenePos[1] + scenePos[2] * scenePos[2]
+  );
+  const orbitalRadiusKm = rScene * KM_PER_SCENE_UNIT;
+  const altitudeKm = Math.max(0, orbitalRadiusKm - EARTH_RADIUS_KM);
+
+  return {
+    scenePos,
+    kmPos,
+    altitudeKm,
+    orbitalRadiusKm
+  };
+}
+
+// Computes the Differential State Vector ("where it is" vs "where it isn't")
+export function getDifferentialVectorState(
+  targetScenePos: [number, number, number],
+  observerScenePos: [number, number, number]
+): DifferentialVectorState {
+  const targetKm: [number, number, number] = [
+    targetScenePos[0] * KM_PER_SCENE_UNIT,
+    targetScenePos[1] * KM_PER_SCENE_UNIT,
+    targetScenePos[2] * KM_PER_SCENE_UNIT
+  ];
+  const observerKm: [number, number, number] = [
+    observerScenePos[0] * KM_PER_SCENE_UNIT,
+    observerScenePos[1] * KM_PER_SCENE_UNIT,
+    observerScenePos[2] * KM_PER_SCENE_UNIT
+  ];
+
+  const dx = targetKm[0] - observerKm[0];
+  const dy = targetKm[1] - observerKm[1];
+  const dz = targetKm[2] - observerKm[2];
+  const rangeKm = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  const norm = rangeKm > 0.001 ? rangeKm : 1;
+  const normalizedDirection: [number, number, number] = [dx / norm, dy / norm, dz / norm];
+
+  return {
+    targetKm,
+    observerKm,
+    deviationKm: [dx, dy, dz],
+    rangeKm,
+    normalizedDirection
+  };
+}
+
+export function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+// Real-time flight position calculator for drones along curved transfer arcs and docked berths
+export function getDroneWorldPosition(
+  drone: Drone,
+  depotPos: [number, number, number],
+  timeSec: number,
+  debrisList?: Debris[]
+): [number, number, number] {
+  if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+    const elapsed = (timeSec * 1000 - drone.flight.startTime) / 1000;
+    const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+    const eased = easeInOutQuad(progress);
+    return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+  }
+  if (drone.status === "capturing" && drone.targetId) {
+    const target = debrisList?.find((d) => d.id === drone.targetId);
+    if (target) {
+      return getDebrisOrbitalPosition(target, timeSec);
+    }
+  }
+  if (drone.subStatus === "ingesting") {
+    return getSmeltingStandOffPosition(depotPos);
+  }
+  if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
+    const ringAngle = getStationRingAngle(timeSec);
+    return getBerthWorldPosition(drone.berthId, depotPos, ringAngle);
+  }
+  return drone.position;
 }
 
 
