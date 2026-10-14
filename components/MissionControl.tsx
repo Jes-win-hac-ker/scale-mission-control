@@ -418,47 +418,32 @@ export default function MissionControl() {
           <AnimatePresence mode="wait">
             {focusedEntity.type === "depot" ? (
               <motion.div
-                key="depot-focus"
-                className="target-focus"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
+                key={isFocusCardMinimized ? "depot-island" : "depot-focus"}
+                className={isFocusCardMinimized ? "target-island-capsule" : "target-focus"}
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
               >
-                <div className="focus-header">
-                  <span className="panel-kicker text-cyan font-bold tracking-widest">
-                    ORBITAL RECOVERY HUB // DEPOT-01
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="status-chip text-emerald-400 border-emerald-400/50 bg-emerald-400/10">
-                      ISRU REFINERY ONLINE · 5 MOORING BERTHS
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsFocusCardMinimized(!isFocusCardMinimized)}
-                      className="focus-toggle-btn"
-                      title={isFocusCardMinimized ? "Expand station diagnostic card" : "Minimize card to unblock view"}
-                      aria-label="Toggle card size"
-                    >
-                      {isFocusCardMinimized ? "□" : "−"}
-                    </button>
-                  </div>
-                </div>
-
                 {isFocusCardMinimized ? (
-                  <div className="minimized-pill-row">
-                    <div className="minimized-title">
-                      <div className="flex items-center gap-2">
+                  <div className="island-inner">
+                    <span className="island-pulse is-emerald" />
+                    <div className="island-info">
+                      <div className="island-title">
                         <strong>PROJECT S.C.A.L.E. DEPOT-01</strong>
-                        <span className="text-[9px] text-emerald-400 font-mono font-bold">ISRU ACTIVE</span>
+                        <span className="island-pill-badge is-emerald">ISRU ACTIVE</span>
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {totalRecoveredMass} kg STORED · {formatMoney(totalRecoveredValue)} YIELD
-                      </span>
+                      <div className="island-meta">
+                        <span>{totalRecoveredMass} kg STORED</span>
+                        <span className="island-meta-sep">·</span>
+                        <span>{formatMoney(totalRecoveredValue)} YIELD</span>
+                      </div>
                     </div>
-                    <div className="minimized-actions">
+
+                    <div className="island-actions">
                       <button
                         type="button"
-                        className="minimized-auto-btn"
+                        className="island-btn cyan"
                         disabled={availableDebrisCount === 0 || idleDroneCount === 0}
                         onClick={autoDispatch}
                         title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching (Hotkey: A)`}
@@ -467,16 +452,36 @@ export default function MissionControl() {
                       </button>
                       <button
                         type="button"
-                        className="minimized-expand-btn"
+                        className="island-icon-btn"
                         onClick={() => setIsFocusCardMinimized(false)}
-                        title="Expand depot telemetry"
+                        title="Expand station diagnostics"
+                        aria-label="Expand station diagnostics"
                       >
-                        EXPAND ↗
+                        ↗
                       </button>
                     </div>
                   </div>
                 ) : (
                   <>
+                    <div className="focus-header">
+                      <span className="panel-kicker text-cyan font-bold tracking-widest">
+                        ORBITAL RECOVERY HUB // DEPOT-01
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="status-chip text-emerald-400 border-emerald-400/50 bg-emerald-400/10">
+                          ISRU REFINERY ONLINE · 5 MOORING BERTHS
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsFocusCardMinimized(true)}
+                          className="focus-toggle-btn"
+                          title="Minimize card to unblock view"
+                          aria-label="Minimize card"
+                        >
+                          −
+                        </button>
+                      </div>
+                    </div>
                     <div className="focus-title">
                       <h2>PROJECT S.C.A.L.E. RECOVERY DEPOT</h2>
                       <span className="target-mat">CENTRAL DOCKING STATION & INDUCTION SMELTING COMPLEX</span>
@@ -524,7 +529,7 @@ export default function MissionControl() {
                           return (
                             <div
                               key={bId}
-                              className={`p-2 rounded border cursor-pointer transition-all ${
+                              className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                                 isDocked
                                   ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
                                   : "bg-slate-900/60 border-cyan/30 text-cyan hover:border-cyan"
@@ -570,56 +575,42 @@ export default function MissionControl() {
               </motion.div>
             ) : selected ? (
               <motion.div
-                key={selected.id}
-                className="target-focus"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
+                key={isFocusCardMinimized ? `selected-island-${selected.id}` : selected.id}
+                className={isFocusCardMinimized ? "target-island-capsule" : "target-focus"}
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
               >
-                <div className="focus-header">
-                  <span className="panel-kicker">SELECTED TARGET</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
-                      {selected.status}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsFocusCardMinimized(!isFocusCardMinimized)}
-                      className="focus-toggle-btn"
-                      title={isFocusCardMinimized ? "Expand target card" : "Minimize card to unblock view"}
-                      aria-label="Toggle card size"
-                    >
-                      {isFocusCardMinimized ? "□" : "−"}
-                    </button>
-                  </div>
-                </div>
-
                 {isFocusCardMinimized ? (
-                  <div className="minimized-pill-row">
-                    <div className="minimized-title">
-                      <div className="flex items-center gap-2">
+                  <div className="island-inner">
+                    <span className={`island-pulse ${selected.status === "available" ? "is-amber" : "is-cyan"}`} />
+                    <div className="island-info">
+                      <div className="island-title">
                         <strong>{selected.id}</strong>
+                        <span className="island-pill-badge">{selected.material}</span>
                         {selected.threatIndex !== undefined && (
                           <span
-                            className={`text-[9px] font-mono px-1 py-0.5 border ${
-                              selected.threatIndex > 50
-                                ? "text-amber border-amber/40 bg-amber/10"
-                                : "text-emerald-400 border-emerald-500/40 bg-emerald-950/20"
+                            className={`island-threat-pill ${
+                              selected.threatIndex > 50 ? "high" : "low"
                             }`}
                           >
-                            THREAT: {selected.threatIndex}/100
+                            THREAT {selected.threatIndex}/100
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {selected.mass} kg · {formatMoney(selected.value)} · {selected.material}
-                      </span>
+                      <div className="island-meta">
+                        <span>{selected.mass} kg</span>
+                        <span className="island-meta-sep">·</span>
+                        <span>{formatMoney(selected.value)}</span>
+                      </div>
                     </div>
-                    <div className="minimized-actions">
+
+                    <div className="island-actions">
                       {selected.status === "available" ? (
                         <button
                           type="button"
-                          className="minimized-fetch-btn"
+                          className="island-btn amber"
                           disabled={idleDroneCount === 0}
                           onClick={() => goFetch(selected.id)}
                           title={`Launch closest drone to intercept ${selected.id} (Hotkey: SPACE)`}
@@ -627,13 +618,13 @@ export default function MissionControl() {
                           GO FETCH ▶
                         </button>
                       ) : (
-                        <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
-                          {selected.status}
+                        <span className={`island-status-pill ${debrisStatusTone[selected.status]}`}>
+                          {selected.status.toUpperCase()}
                         </span>
                       )}
                       <button
                         type="button"
-                        className="minimized-auto-btn"
+                        className="island-btn cyan"
                         disabled={availableDebrisCount === 0 || idleDroneCount === 0}
                         onClick={autoDispatch}
                         title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching (Hotkey: A)`}
@@ -642,16 +633,34 @@ export default function MissionControl() {
                       </button>
                       <button
                         type="button"
-                        className="minimized-expand-btn"
+                        className="island-icon-btn"
                         onClick={() => setIsFocusCardMinimized(false)}
                         title="Expand telemetry details"
+                        aria-label="Expand telemetry details"
                       >
-                        EXPAND ↗
+                        ↗
                       </button>
                     </div>
                   </div>
                 ) : (
                   <>
+                    <div className="focus-header">
+                      <span className="panel-kicker">SELECTED TARGET</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`status-chip ${debrisStatusTone[selected.status]}`}>
+                          {selected.status}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsFocusCardMinimized(true)}
+                          className="focus-toggle-btn"
+                          title="Minimize card to unblock view"
+                          aria-label="Minimize card"
+                        >
+                          −
+                        </button>
+                      </div>
+                    </div>
                     <div className="focus-title">
                   <h2>{selected.id}</h2>
                   <span className="target-mat">{selected.material}</span>
