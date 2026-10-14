@@ -445,6 +445,30 @@ export function getSmeltingStandOffPosition(
   return [depotPosOrTimeSec[0], depotPosOrTimeSec[1] - 0.70, depotPosOrTimeSec[2]];
 }
 
+// Distinct spatial holding pattern coordinates for drones in DEPOT-01 approach queue
+// Local coordinates relative to station center & orientation matrix to prevent collision
+export const HOLDING_PATTERN_SLOTS: [number, number, number][] = [
+  [-0.95, -0.75, -0.45], // Holding Slot 1 (Port Aft Standoff)
+  [0.95, -0.75, -0.45],  // Holding Slot 2 (Starboard Aft Standoff)
+  [0.0, -1.15, 0.75],   // Holding Slot 3 (Lower Forward Tier)
+  [0.0, -1.15, -0.85],  // Holding Slot 4 (Lower Aft Tier)
+  [-1.25, -0.90, 0.0],  // Holding Slot 5 (Port Flank Standoff)
+  [1.25, -0.90, 0.0]    // Holding Slot 6 (Starboard Flank Standoff)
+];
+
+// Computes real-time 3D world coordinate of a designated traffic control holding slot
+export function getStationHoldingPosition(
+  slotIndex: number,
+  timeSec: number,
+  depot?: { position?: [number, number, number] }
+): [number, number, number] {
+  const { position, rotationMatrix } = getStationTransform(timeSec, depot);
+  const safeIdx = Math.abs(slotIndex) % HOLDING_PATTERN_SLOTS.length;
+  const slot = HOLDING_PATTERN_SLOTS[safeIdx];
+  const localVec = new THREE.Vector3(...slot).applyMatrix4(rotationMatrix);
+  return [position[0] + localVec.x, position[1] + localVec.y, position[2] + localVec.z];
+}
+
 function dist3(a: [number, number, number], b: [number, number, number]): number {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -458,24 +482,24 @@ export function calculateRendezvousTrajectory(
   startPos: [number, number, number],
   debris: Debris,
   startTimeSec: number,
-  droneSpeed = 1.2
+  droneSpeed = 0.5
 ): {
   durationSec: number;
   rendezvousPosition: [number, number, number];
   distance: number;
 } {
   const d0 = dist3(startPos, getDebrisOrbitalPosition(debris, startTimeSec));
-  const t0 = Math.min(5.5, Math.max(1.8, d0 / droneSpeed));
+  const t0 = Math.min(13.0, Math.max(5.5, d0 / droneSpeed));
 
   // Iteration 1: Update target position based on t0
   const pos1 = getDebrisOrbitalPosition(debris, startTimeSec + t0);
   const d1 = dist3(startPos, pos1);
-  const t1 = Math.min(5.5, Math.max(1.8, d1 / droneSpeed));
+  const t1 = Math.min(13.0, Math.max(5.5, d1 / droneSpeed));
 
   // Iteration 2: Refine target position based on t1
   const pos2 = getDebrisOrbitalPosition(debris, startTimeSec + t1);
   const d2 = dist3(startPos, pos2);
-  const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
+  const t2 = Math.min(13.0, Math.max(5.5, d2 / droneSpeed));
 
   const finalPos = getDebrisOrbitalPosition(debris, startTimeSec + t2);
   const outward = new THREE.Vector3(...finalPos).normalize();
@@ -499,24 +523,24 @@ export function calculateDepotRendezvousTrajectory(
   startPos: [number, number, number],
   depot: { position?: [number, number, number] } | undefined,
   startTimeSec: number,
-  droneSpeed = 1.2
+  droneSpeed = 0.5
 ): {
   durationSec: number;
   rendezvousPosition: [number, number, number];
   distance: number;
 } {
   const d0 = dist3(startPos, getSmeltingStandOffPosition(startTimeSec));
-  const t0 = Math.min(5.5, Math.max(1.8, d0 / droneSpeed));
+  const t0 = Math.min(13.0, Math.max(5.5, d0 / droneSpeed));
 
   // Iteration 1: refine target standoff based on t0
   const pos1 = getSmeltingStandOffPosition(startTimeSec + t0);
   const d1 = dist3(startPos, pos1);
-  const t1 = Math.min(5.5, Math.max(1.8, d1 / droneSpeed));
+  const t1 = Math.min(13.0, Math.max(5.5, d1 / droneSpeed));
 
   // Iteration 2: refine target standoff based on t1
   const pos2 = getSmeltingStandOffPosition(startTimeSec + t1);
   const d2 = dist3(startPos, pos2);
-  const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
+  const t2 = Math.min(13.0, Math.max(5.5, d2 / droneSpeed));
 
   const finalPos = getSmeltingStandOffPosition(startTimeSec + t2);
   const finalDist = dist3(startPos, finalPos);
@@ -697,6 +721,9 @@ export function getDroneWorldPosition(
       }
       return dPos;
     }
+  }
+  if (drone.subStatus === "holding") {
+    return getStationHoldingPosition(0, timeSec);
   }
   if (drone.subStatus === "ingesting") {
     return getSmeltingStandOffPosition(timeSec);

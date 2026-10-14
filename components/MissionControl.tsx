@@ -57,11 +57,25 @@ function getSubStatusLabel(drone: Drone): string {
         return "CLAMP";
       case "towing":
         return "TOWING";
+      case "holding":
+        return "HOLDING";
+      case "ingesting":
+        return "REFINING";
       case "docking":
         return "DOCKING";
     }
   }
   return drone.status.toUpperCase();
+}
+
+function getDroneStatusChipTone(drone: Drone): string {
+  if (drone.subStatus === "holding") {
+    return "text-amber-300 border-amber-400/60 bg-amber-500/20 animate-pulse";
+  }
+  if (drone.subStatus === "ingesting") {
+    return "text-emerald-300 border-emerald-400/60 bg-emerald-500/20 animate-pulse";
+  }
+  return droneStatusTone[drone.status] || "text-cyan border-cyan/50 bg-cyan/10";
 }
 
 
@@ -113,7 +127,9 @@ export default function MissionControl() {
     clearWarning,
     goFetch,
     autoDispatch,
-    resetSimulation
+    resetSimulation,
+    dockingQueue,
+    isRefineryOccupied
   } = useMissionStore();
 
   const [mounted, setMounted] = useState(false);
@@ -977,9 +993,16 @@ export default function MissionControl() {
               <span className="panel-kicker">TELEMETRY</span>
               <h1>SWARM DRONES</h1>
             </div>
-            <span className="online-count">
-              {idleDroneCount}/{drones.length} IDLE
-            </span>
+            <div className="flex items-center gap-2">
+              {dockingQueue.length > 0 && (
+                <span className="font-mono text-[9px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                  QUEUE: {dockingQueue.length}
+                </span>
+              )}
+              <span className="online-count">
+                {idleDroneCount}/{drones.length} IDLE
+              </span>
+            </div>
           </div>
 
           <div className="drone-list">
@@ -1005,8 +1028,13 @@ export default function MissionControl() {
                     <span className="berth-badge font-mono text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 text-cyan border border-cyan/40 ml-2">
                       {drone.berthId === "STAGING" ? "STAGING" : `BERTH ${drone.berthId}`}
                     </span>
+                    {drone.subStatus === "holding" && (
+                      <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-500/50 ml-2 animate-pulse">
+                        QUEUE #{dockingQueue.indexOf(drone.id) + 1}
+                      </span>
+                    )}
                   </div>
-                  <span className={`status-chip ${droneStatusTone[drone.status]}`}>
+                  <span className={`status-chip ${getDroneStatusChipTone(drone)}`}>
                     {getSubStatusLabel(drone)}
                   </span>
                 </div>

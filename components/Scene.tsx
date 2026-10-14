@@ -26,6 +26,7 @@ import {
   getOrbitalArcTangent,
   getSmeltingIntakePosition,
   getSmeltingStandOffPosition,
+  getStationHoldingPosition,
   getStationOrbitalPosition,
   getStationOrbitTrackSamples,
   getStationRingAngle,
@@ -551,6 +552,7 @@ function DroneMesh({
   const debrisList = useMissionStore((state) => state.debris);
   const depot = useMissionStore((state) => state.depot);
   const focusEntity = useMissionStore((state) => state.focusEntity);
+  const dockingQueue = useMissionStore((state) => state.dockingQueue);
 
   const [flightPhase, setFlightPhase] = useState<"accel" | "coast" | "brake">("accel");
 
@@ -560,7 +562,11 @@ function DroneMesh({
   // - Capturing drones: pulsing white
   // - Returning drones: green
   // - Recovered: green
+  // - Holding in traffic queue: amber
   const baseColor = useMemo(() => {
+    if (drone.subStatus === "holding") {
+      return "#FFB300"; // Amber warning for holding pattern
+    }
     switch (drone.status) {
       case "idle":
         return "#00FFFF"; // cyan
@@ -577,14 +583,14 @@ function DroneMesh({
       default:
         return "#00FFFF";
     }
-  }, [drone.status]);
+  }, [drone.status, drone.subStatus]);
 
-  // Carried debris when actively clamping in claws or returning payload to Docking Station
+  // Carried debris when actively clamping in claws or returning payload to Docking Station (including queue holding)
   const carriedDebris = useMemo(() => {
     if (!drone.targetId) return null;
     if (
       (drone.status === "capturing" && drone.subStatus === "clamping") ||
-      (drone.status === "returning" && drone.subStatus === "towing")
+      (drone.status === "returning" && (drone.subStatus === "towing" || drone.subStatus === "holding"))
     ) {
       return debrisList.find((d) => d.id === drone.targetId) || null;
     }
@@ -686,6 +692,20 @@ function DroneMesh({
         }
       } else {
         groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
+      }
+    } else if (drone.subStatus === "holding") {
+      // 2.5. Holding Pattern: Stand off in assigned station-keeping slot while waiting for smelting corridor to clear
+      const queueIndex = dockingQueue.indexOf(drone.id);
+      const slotIndex = queueIndex >= 0 ? queueIndex : 0;
+      const holdingPos = getStationHoldingPosition(slotIndex, clock.elapsedTime);
+      groupRef.current.position.lerp(new THREE.Vector3(...holdingPos), 0.1);
+
+      if (modelRef.current) {
+        // Face toward station intake with subtle station-keeping attitude
+        const intake = getSmeltingIntakePosition(clock.elapsedTime);
+        modelRef.current.lookAt(new THREE.Vector3(...intake));
+        // Attitude micro-oscillation for active RCS station keeping
+        modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 4 + slotIndex) * 0.02;
       }
     } else if (drone.subStatus === "ingesting") {
       // 3. Underside Refinery Ingestion Stand-off: holding below moving station intake

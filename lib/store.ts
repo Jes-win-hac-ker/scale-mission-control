@@ -11,6 +11,7 @@ import {
   getGlobalSimTime,
   getSmeltingIntakePosition,
   getSmeltingStandOffPosition,
+  getStationHoldingPosition,
   getStationOrbitalPosition,
   getStationRingAngle
 } from "./orbital";
@@ -44,6 +45,7 @@ export type DroneSubStatus =
   | "detumbling"
   | "clamping"
   | "towing"
+  | "holding"
   | "ingesting"
   | "docking";
 
@@ -467,7 +469,7 @@ const initialDrones: Drone[] = [
     fuel: 100,
     payload: 0,
     targetId: null,
-    speed: 1.2
+    speed: 0.5
   },
   {
     id: "DRONE-02",
@@ -478,7 +480,7 @@ const initialDrones: Drone[] = [
     fuel: 100,
     payload: 0,
     targetId: null,
-    speed: 1.2
+    speed: 0.5
   },
   {
     id: "DRONE-03",
@@ -489,7 +491,7 @@ const initialDrones: Drone[] = [
     fuel: 100,
     payload: 0,
     targetId: null,
-    speed: 1.2
+    speed: 0.5
   },
   {
     id: "DRONE-04",
@@ -500,7 +502,7 @@ const initialDrones: Drone[] = [
     fuel: 100,
     payload: 0,
     targetId: null,
-    speed: 1.2
+    speed: 0.5
   },
   {
     id: "DRONE-05",
@@ -511,7 +513,7 @@ const initialDrones: Drone[] = [
     fuel: 100,
     payload: 0,
     targetId: null,
-    speed: 1.2
+    speed: 0.5
   }
 ];
 
@@ -529,6 +531,8 @@ type MissionState = {
   swarmStrategy: SwarmStrategy;
   logs: CommandLog[];
   warning: string | null;
+  dockingQueue: string[]; // Sequential holding queue for DEPOT-01 smelting standoff to prevent drone collision
+  isRefineryOccupied: boolean; // True when a drone is actively ingesting/releasing payload at the underside stand-off
 
   selectDebris: (id: string) => void;
   focusEntity: (type: FocusedEntity["type"], id?: string) => void;
@@ -536,6 +540,7 @@ type MissionState = {
   addLog: (message: string, tone?: CommandLog["tone"]) => void;
   setSwarmStrategy: (strategy: SwarmStrategy) => void;
   goFetch: (debrisId?: string, preferredDroneId?: string) => boolean;
+  processIngestionAndDocking: (droneId: string, debrisId: string) => void;
   autoDispatch: () => void;
   resetSimulation: () => void;
 };
@@ -557,6 +562,8 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     silicates: 0
   },
   swarmStrategy: "balanced",
+  dockingQueue: [],
+  isRefineryOccupied: false,
   logs: [
     {
       id: "init-1",
@@ -682,7 +689,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const currentDronePos = (bestDrone.status === "idle" || bestDrone.subStatus === "docked" || !bestDrone.flight)
       ? getBerthWorldPosition(bestDrone.berthId, simTime)
       : bestDrone.position;
-    const droneSpeed = bestDrone.speed || 1.2;
+    const droneSpeed = bestDrone.speed || 0.5;
 
     // Predictive Keplerian Rendezvous Solver:
     // Calculates future coordinates where drone intercept arc and orbiting debris will meet
@@ -700,7 +707,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const estDepotRendezvous = calculateDepotRendezvousTrajectory(
       rendezvousPos,
       depot,
-      simTime + interceptDurationSec + 1.9,
+      simTime + interceptDurationSec + 3.3,
       droneSpeed
     );
     const returnDist = estDepotRendezvous.distance;
@@ -762,7 +769,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         )
       }));
 
-      // Step 2B: Mechanical clamping & grapple lock after 900ms
+      // Step 2B: Mechanical clamping & grapple lock after 1800ms
       setTimeout(() => {
         get().addLog(`${droneId} HARPOON TETHER LOCKED // HYDRAULIC CLAWS CLAMPED ON ${target.id}`, "success");
 
@@ -775,7 +782,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
           )
         }));
 
-        // Step 3: Initiate Inbound Tow Return towards Orbiting Station after 1000ms (1.9s total capture)
+        // Step 3: Initiate Inbound Tow Return towards Orbiting Station after 1500ms (3.3s total capture)
         setTimeout(() => {
           get().addLog(`${droneId} TOWING ${target.id} // INBOUND DESCENT TO ORBITING DEPOT-01 ISRU REFINERY`, "action");
 
@@ -818,114 +825,175 @@ export const useMissionStore = create<MissionState>((set, get) => ({
             )
           }));
 
-          // Step 4: Reaches Smelting Stand-Off Coordinate -> Payload Release & Ingestion into ISRU Vortex
+          // Step 4: Reaches Station Perimeter -> Check Traffic Control Queue to Prevent Collision
           setTimeout(() => {
-            get().addLog(
-              `${droneId} PAYLOAD RELEASED // DEPOT-01 ISRU VORTEX INGESTING ${target.id} [${target.mass} kg]`,
-              "action"
-            );
-
-            const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
-            const liveSmeltingStandOff = getSmeltingStandOffPosition(arriveSimTime);
-
-            set((current) => ({
-              debris: current.debris.map((item) =>
-                item.id === target.id
-                  ? { ...item, status: "captured", subStatus: "ingesting", position: liveSmeltingStandOff }
-                  : item
-              ),
-              drones: current.drones.map((d) =>
-                d.id === droneId
-                  ? {
-                      ...d,
-                      status: "recovered",
-                      subStatus: "ingesting",
-                      position: liveSmeltingStandOff,
-                      payload: 0,
-                      flight: undefined
-                    }
-                  : d
-              )
-            }));
-
-            // Step 4B: Ingestion & Smelting Plasma Flash after 900ms
-            setTimeout(() => {
-              const formattedVal = formatLogValue(target.value);
-              const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
-              const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
-              const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
-              const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
-              const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
-
+            const currentStore = get();
+            if (currentStore.isRefineryOccupied) {
+              // Traffic Control Queue: Stand-off is currently occupied by another drone!
+              const currentQueue = currentStore.dockingQueue;
+              const queueIndex = currentQueue.length;
+              const queueSlotNum = queueIndex + 1;
               get().addLog(
-                `${target.id} REFINED & SMELTED // +${target.mass} kg // +${formattedVal} // Ti: +${titaniumKg}kg, Pt: +${preciousKg}kg, Si: +${semiKg}kg, FUEL: +${propellantKg}kg`,
-                "success"
-              );
-              get().addLog(
-                `${droneId} CLEARED FROM REFINERY // ASCENDING TO BERTH ${bestDrone.berthId}`,
-                "action"
+                `TRAFFIC CONTROL // ${droneId} INBOUND // REFINERY ACTIVE // ENTERING HOLDING PATTERN [SLOT #${queueSlotNum}]`,
+                "warning"
               );
 
-              const smeltSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
-              const liveIntakePos = getSmeltingIntakePosition(smeltSimTime);
-              const liveStandOffPos = getSmeltingStandOffPosition(smeltSimTime);
+              const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
+              const holdingPos = getStationHoldingPosition(queueIndex, arriveSimTime);
 
-              set((current) => {
-                return {
-                  totalRecoveredMass: current.totalRecoveredMass + target.mass,
-                  totalRecoveredValue: current.totalRecoveredValue + target.value,
-                  lastSmeltedAt: Date.now(),
-                  stockpile: {
-                    titanium: current.stockpile.titanium + titaniumKg,
-                    preciousMetals: current.stockpile.preciousMetals + preciousKg,
-                    semiconductors: current.stockpile.semiconductors + semiKg,
-                    propellant: current.stockpile.propellant + propellantKg,
-                    silicates: current.stockpile.silicates + silicatesKg
-                  },
-                  debris: current.debris.map((item) =>
-                    item.id === target.id
-                      ? {
-                          ...item,
-                          status: "recovered",
-                          subStatus: "smelted",
-                          position: liveIntakePos
-                        }
-                      : item
-                  ),
-                  drones: current.drones.map((d) =>
-                    d.id === droneId
-                      ? {
-                          ...d,
-                          status: "recovered",
-                          subStatus: "docking",
-                          position: liveStandOffPos,
-                          fuel: 100,
-                          targetId: null
-                        }
-                      : d
-                  )
-                };
-              });
-
-              // Step 5: Smooth Berth Approach & Magnetic Mooring after 1200ms
-              setTimeout(() => {
-                get().addLog(
-                  `${droneId} MOORED AT BERTH ${bestDrone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
-                  "success"
-                );
-                set((current) => ({
-                  drones: current.drones.map((d) =>
-                    d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
-                  )
-                }));
-              }, 1200);
-            }, 900);
+              set((current) => ({
+                dockingQueue: [...current.dockingQueue, droneId],
+                drones: current.drones.map((d) =>
+                  d.id === droneId
+                    ? {
+                        ...d,
+                        status: "returning",
+                        subStatus: "holding",
+                        position: holdingPos,
+                        flight: undefined
+                      }
+                    : d
+                )
+              }));
+            } else {
+              // Corridor free -> Grant immediate landing & ingestion clearance
+              set({ isRefineryOccupied: true });
+              get().processIngestionAndDocking(droneId, target.id);
+            }
           }, liveReturnDurationMs);
-        }, 1000);
-      }, 900);
+        }, 1500);
+      }, 1800);
     }, interceptDurationMs);
 
     return true;
+  },
+
+  processIngestionAndDocking: (droneId: string, debrisId: string) => {
+    const drone = get().drones.find((d) => d.id === droneId);
+    const target = get().debris.find((item) => item.id === debrisId);
+    if (!drone || !target) {
+      set({ isRefineryOccupied: false });
+      return;
+    }
+
+    get().addLog(
+      `TRAFFIC CONTROL // ${droneId} CLEARED FOR APPROACH // SMELTING STAND-OFF LOCKED // INGESTING ${target.id} [${target.mass} kg]`,
+      "action"
+    );
+
+    const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
+    const liveSmeltingStandOff = getSmeltingStandOffPosition(arriveSimTime);
+
+    set((current) => ({
+      dockingQueue: current.dockingQueue.filter((id) => id !== droneId),
+      debris: current.debris.map((item) =>
+        item.id === target.id
+          ? { ...item, status: "captured", subStatus: "ingesting", position: liveSmeltingStandOff }
+          : item
+      ),
+      drones: current.drones.map((d) =>
+        d.id === droneId
+          ? {
+              ...d,
+              status: "recovered",
+              subStatus: "ingesting",
+              position: liveSmeltingStandOff,
+              payload: 0,
+              flight: undefined
+            }
+          : d
+      )
+    }));
+
+    // Step 4B: Ingestion & Smelting Plasma Flash after 1800ms
+    setTimeout(() => {
+      const formattedVal = formatLogValue(target.value);
+      const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
+      const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
+      const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
+      const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
+      const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
+
+      get().addLog(
+        `${target.id} REFINED & SMELTED // +${target.mass} kg // +${formattedVal} // Ti: +${titaniumKg}kg, Pt: +${preciousKg}kg, Si: +${semiKg}kg, FUEL: +${propellantKg}kg`,
+        "success"
+      );
+      get().addLog(
+        `${droneId} CLEARED FROM REFINERY // ASCENDING TO BERTH ${drone.berthId}`,
+        "action"
+      );
+
+      const smeltSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
+      const liveIntakePos = getSmeltingIntakePosition(smeltSimTime);
+      const liveStandOffPos = getSmeltingStandOffPosition(smeltSimTime);
+
+      set((current) => ({
+        totalRecoveredMass: current.totalRecoveredMass + target.mass,
+        totalRecoveredValue: current.totalRecoveredValue + target.value,
+        lastSmeltedAt: Date.now(),
+        stockpile: {
+          titanium: current.stockpile.titanium + titaniumKg,
+          preciousMetals: current.stockpile.preciousMetals + preciousKg,
+          semiconductors: current.stockpile.semiconductors + semiKg,
+          propellant: current.stockpile.propellant + propellantKg,
+          silicates: current.stockpile.silicates + silicatesKg
+        },
+        debris: current.debris.map((item) =>
+          item.id === target.id
+            ? {
+                ...item,
+                status: "recovered",
+                subStatus: "smelted",
+                position: liveIntakePos
+              }
+            : item
+        ),
+        drones: current.drones.map((d) =>
+          d.id === droneId
+            ? {
+                ...d,
+                status: "recovered",
+                subStatus: "docking",
+                position: liveStandOffPos,
+                fuel: 100,
+                targetId: null
+              }
+            : d
+        )
+      }));
+
+      // Corridor is now clear! Release corridor and check if another drone is waiting in dockingQueue
+      const updatedStore = get();
+      if (updatedStore.dockingQueue.length > 0) {
+        const nextDroneId = updatedStore.dockingQueue[0];
+        const nextDrone = updatedStore.drones.find((d) => d.id === nextDroneId);
+        if (nextDrone && nextDrone.targetId) {
+          get().addLog(
+            `TRAFFIC CONTROL // ${nextDroneId} CLEARED FROM HOLDING QUEUE // COMMENCING APPROACH`,
+            "action"
+          );
+          // Keep corridor occupied for the incoming drone
+          get().processIngestionAndDocking(nextDroneId, nextDrone.targetId);
+        } else {
+          set({ isRefineryOccupied: false });
+        }
+      } else {
+        set({ isRefineryOccupied: false });
+      }
+
+      // Step 5: Smooth Berth Approach & Magnetic Mooring after 2400ms
+      setTimeout(() => {
+        get().addLog(
+          `${droneId} MOORED AT BERTH ${drone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
+          "success"
+        );
+        set((current) => ({
+          drones: current.drones.map((d) =>
+            d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
+          )
+        }));
+      }, 2400);
+    }, 1800);
   },
 
   autoDispatch: () => {
@@ -999,6 +1067,8 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       },
       swarmStrategy: "balanced",
       warning: null,
+      dockingQueue: [],
+      isRefineryOccupied: false,
       logs: [
         {
           id: `reset-${Date.now()}`,
