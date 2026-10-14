@@ -234,4 +234,61 @@ export function getBerthOutwardNormal(
   return [rx / len, 0, rz / len];
 }
 
+// Underside ISRU Smelting Vortex core intake coordinate
+export function getSmeltingIntakePosition(
+  depotPos: [number, number, number]
+): [number, number, number] {
+  return [depotPos[0], depotPos[1] - 0.48, depotPos[2]];
+}
+
+// Underside stand-off hover coordinate where returning drones hold while releasing payload
+export function getSmeltingStandOffPosition(
+  depotPos: [number, number, number]
+): [number, number, number] {
+  return [depotPos[0], depotPos[1] - 0.70, depotPos[2]];
+}
+
+function dist3(a: [number, number, number], b: [number, number, number]): number {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Predictive Keplerian Rendezvous Solver:
+// Solves for exact future coordinates where drone intercept arc and orbiting debris will meet
+export function calculateRendezvousTrajectory(
+  startPos: [number, number, number],
+  debris: Debris,
+  startTimeSec: number,
+  droneSpeed = 1.2
+): {
+  durationSec: number;
+  rendezvousPosition: [number, number, number];
+  distance: number;
+} {
+  const d0 = dist3(startPos, getDebrisOrbitalPosition(debris, startTimeSec));
+  const t0 = Math.min(5.5, Math.max(1.8, d0 / droneSpeed));
+
+  // Iteration 1: Update target position based on t0
+  const pos1 = getDebrisOrbitalPosition(debris, startTimeSec + t0);
+  const d1 = dist3(startPos, pos1);
+  const t1 = Math.min(5.5, Math.max(1.8, d1 / droneSpeed));
+
+  // Iteration 2: Refine target position based on t1
+  const pos2 = getDebrisOrbitalPosition(debris, startTimeSec + t1);
+  const d2 = dist3(startPos, pos2);
+  const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
+
+  const finalPos = getDebrisOrbitalPosition(debris, startTimeSec + t2);
+  const finalDist = dist3(startPos, finalPos);
+
+  return {
+    durationSec: t2,
+    rendezvousPosition: finalPos,
+    distance: finalDist
+  };
+}
+
+
 

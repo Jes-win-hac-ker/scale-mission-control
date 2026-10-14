@@ -3,8 +3,11 @@
 import { create } from "zustand";
 import {
   DroneBerthId,
+  calculateRendezvousTrajectory,
   getBerthWorldPosition,
   getDebrisOrbitalPosition,
+  getSmeltingIntakePosition,
+  getSmeltingStandOffPosition,
   getStationRingAngle
 } from "./orbital";
 import {
@@ -37,6 +40,7 @@ export type DroneSubStatus =
   | "detumbling"
   | "clamping"
   | "towing"
+  | "ingesting"
   | "docking";
 
 export type DroneFlight = {
@@ -45,6 +49,7 @@ export type DroneFlight = {
   startTime: number;
   duration: number; // in seconds
   fuelCost: number;
+  type?: "intercept" | "return" | "docking";
 };
 
 export interface DepotStockpile {
@@ -62,6 +67,7 @@ export type Debris = {
   value: number;
   material: string;
   status: DebrisStatus;
+  subStatus?: "free" | "detumbling" | "clamped" | "towed" | "ingesting" | "smelted";
   assignedDroneId?: string | null;
   assay: MaterialAssay;
   threatIndex: number;
@@ -472,33 +478,39 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       const ringAngle = getStationRingAngle(Date.now() / 1000);
       currentDronePos = getBerthWorldPosition(bestDrone.berthId, depot.position, ringAngle);
     }
-    const debrisPos = currentDebrisPos;
-    const depotPos = depot.position;
-    const droneSpeed = bestDrone.speed;
+    const droneSpeed = bestDrone.speed || 1.2;
 
-    // Distances and time-based durations
-    const interceptDist = distance(currentDronePos, debrisPos);
-    const interceptDurationSec = Math.max(1.2, interceptDist / droneSpeed);
+    // Predictive Keplerian Rendezvous Solver:
+    // Calculates future coordinates where drone intercept arc and orbiting debris will meet
+    const rendezvous = calculateRendezvousTrajectory(
+      currentDronePos,
+      target,
+      Date.now() / 1000,
+      droneSpeed
+    );
+    const interceptDurationSec = rendezvous.durationSec;
     const interceptDurationMs = interceptDurationSec * 1000;
+    const rendezvousPos = rendezvous.rendezvousPosition;
 
-    const returnDist = distance(debrisPos, depotPos);
-    const returnDurationSec = Math.max(1.2, returnDist / droneSpeed);
+    // Underside Refinery Stand-off Coordinate below station core
+    const smeltingStandOff = getSmeltingStandOffPosition(depot.position);
+    const returnDist = distance(rendezvousPos, smeltingStandOff);
+    const returnDurationSec = Math.min(5.5, Math.max(1.8, returnDist / droneSpeed));
     const returnDurationMs = returnDurationSec * 1000;
 
-    const dvTotal = calculateDeltaV(interceptDist, 0) + calculateDeltaV(returnDist, target.mass);
+    const dvTotal = calculateDeltaV(rendezvous.distance, 0) + calculateDeltaV(returnDist, target.mass);
 
-    // Protocol Step 3 & 4:
-    // Assign drone to debris, set drone status to "intercepting", set debris to "targeted"
+    // Protocol Step 1: Assign drone to debris, set drone status to "intercepting", set debris to "targeted"
     get().addLog(`GO-FETCH ISSUED // TARGET: ${target.id} // THREAT: ${target.threatIndex}/100`, "action");
     get().addLog(
-      `${droneId} [${bestDrone.berthId}] UNMOORING // RCS CLEARANCE & ION INJECTION // Δv: ${dvTotal.toLocaleString()} m/s // BURN: ${chosenFuelCost} kg`,
+      `${droneId} [${bestDrone.berthId}] UNMOORING // PREDICTIVE RENDEZVOUS SOLVED // ETA: ${interceptDurationSec.toFixed(1)}s // Δv: ${dvTotal.toLocaleString()} m/s // BURN: ${chosenFuelCost} kg`,
       "action"
     );
 
     set((current) => ({
       debris: current.debris.map((item) =>
         item.id === target.id
-          ? { ...item, status: "targeted", position: debrisPos, assignedDroneId: droneId }
+          ? { ...item, status: "targeted", subStatus: "free", assignedDroneId: droneId }
           : item
       ),
       drones: current.drones.map((d) =>
@@ -510,56 +522,61 @@ export const useMissionStore = create<MissionState>((set, get) => ({
               targetId: target.id,
               flight: {
                 startPosition: currentDronePos,
-                targetPosition: debrisPos,
+                targetPosition: rendezvousPos,
                 startTime: Date.now(),
                 duration: interceptDurationSec,
-                fuelCost: chosenFuelCost
+                fuelCost: chosenFuelCost,
+                type: "intercept"
               }
             }
           : d
       )
     }));
 
-    // Step 5 & 6:
-    // Animate to debris. When drone reaches debris:
-    // - set drone status to "capturing"
-    // - detumble / spin-matching
-    // - mechanical clamping
+    // Step 2: Animate along curved orbital arc to predictive rendezvous position
     setTimeout(() => {
-      // Step 5A: Reached debris -> Spin-matching & Detumbling
-      get().addLog(`${droneId} RENDEZVOUS // SPIN-MATCHING & DETUMBLING ${target.id}`, "action");
+      // Step 2A: Rendezvous achieved -> Co-orbital spin-matching & active detumble
+      get().addLog(`${droneId} RENDEZVOUS // ACTIVE SPIN-MATCHING & DETUMBLE TRACTOR ENGAGED`, "action");
 
       set((current) => ({
+        debris: current.debris.map((item) =>
+          item.id === target.id ? { ...item, subStatus: "detumbling" } : item
+        ),
         drones: current.drones.map((d) =>
           d.id === droneId
             ? {
                 ...d,
                 status: "capturing",
                 subStatus: "detumbling",
-                position: debrisPos,
+                position: rendezvousPos,
                 flight: undefined
               }
             : d
         )
       }));
 
-      // Step 5B: Clamping & Grapple lock after 800ms
+      // Step 2B: Mechanical clamping & grapple lock after 900ms
       setTimeout(() => {
-        get().addLog(`${droneId} EXTRACTION RIG DEPLOYED // TRACTOR FIELD & CLAMPS LOCKED`, "success");
+        get().addLog(`${droneId} HARPOON TETHER LOCKED // HYDRAULIC CLAWS CLAMPED ON ${target.id}`, "success");
 
         set((current) => ({
+          debris: current.debris.map((item) =>
+            item.id === target.id ? { ...item, status: "captured", subStatus: "clamped" } : item
+          ),
           drones: current.drones.map((d) =>
             d.id === droneId ? { ...d, subStatus: "clamping" } : d
           )
         }));
 
-        // Step 6 & 7: Clamping secured -> initiate Tow Return to depot after 1000ms (1.8s total capturing)
+        // Step 3: Initiate Inbound Tow Return towards Underside Smelting Stand-Off after 1000ms (1.9s total capture)
         setTimeout(() => {
-          get().addLog(`${droneId} TOWING ${target.id} // INBOUND TRANSFER TO ${depot.id}`, "action");
+          get().addLog(`${droneId} TOWING ${target.id} // INBOUND DESCENT TO DEPOT-01 ISRU REFINERY`, "action");
+
+          const realTimeCapturePos = getDebrisOrbitalPosition(target, Date.now() / 1000);
 
           set((current) => ({
             debris: current.debris.map((item) =>
-              item.id === target.id ? { ...item, status: "captured" } : item
+              item.id === target.id ? { ...item, subStatus: "towed" } : item
             ),
             drones: current.drones.map((d) =>
               d.id === droneId
@@ -569,90 +586,125 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                     subStatus: "towing",
                     payload: target.mass,
                     flight: {
-                      startPosition: debrisPos,
-                      targetPosition: depotPos,
+                      startPosition: realTimeCapturePos,
+                      targetPosition: smeltingStandOff,
                       startTime: Date.now(),
                       duration: returnDurationSec,
-                      fuelCost: chosenFuelCost
+                      fuelCost: chosenFuelCost,
+                      type: "return"
                     }
                   }
                 : d
             )
           }));
 
-          // Step 8 & 9: Inbound flight reaches depot -> smelting handoff & berth docking
+          // Step 4: Reaches Smelting Stand-Off Coordinate -> Payload Release & Ingestion into ISRU Vortex
           setTimeout(() => {
-            const formattedVal = formatLogValue(target.value);
-            const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
-            const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
-            const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
-            const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
-            const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
-
             get().addLog(
-              `${target.id} SECURED & SMELTED // +${target.mass} kg // +${formattedVal} // Ti: +${titaniumKg}kg, Pt: +${preciousKg}kg, Si: +${semiKg}kg, FUEL: +${propellantKg}kg`,
-              "success"
+              `${droneId} PAYLOAD RELEASED // DEPOT-01 ISRU VORTEX INGESTING ${target.id} [${target.mass} kg]`,
+              "action"
             );
-            get().addLog(`${droneId} PAYLOAD TRANSFERRED // APPROACHING BERTH ${bestDrone.berthId}`, "action");
 
-            set((current) => {
-              const thisDrone = current.drones.find((d) => d.id === droneId);
-              const baseFuel = thisDrone
-                ? Math.max(0, Math.round((thisDrone.fuel - chosenFuelCost) * 10) / 10)
-                : 0;
+            set((current) => ({
+              debris: current.debris.map((item) =>
+                item.id === target.id
+                  ? { ...item, status: "captured", subStatus: "ingesting", position: smeltingStandOff }
+                  : item
+              ),
+              drones: current.drones.map((d) =>
+                d.id === droneId
+                  ? {
+                      ...d,
+                      status: "recovered",
+                      subStatus: "ingesting",
+                      position: smeltingStandOff,
+                      payload: 0,
+                      flight: undefined
+                    }
+                  : d
+              )
+            }));
 
-              // In-situ propellant recycling
-              const refuelBonus = Math.min(30, Math.round(propellantKg * 0.75));
-              const newFuel = Math.min(100, Math.round((baseFuel + refuelBonus) * 10) / 10);
-
-              return {
-                totalRecoveredMass: current.totalRecoveredMass + target.mass,
-                totalRecoveredValue: current.totalRecoveredValue + target.value,
-                lastSmeltedAt: Date.now(),
-                stockpile: {
-                  titanium: current.stockpile.titanium + titaniumKg,
-                  preciousMetals: current.stockpile.preciousMetals + preciousKg,
-                  semiconductors: current.stockpile.semiconductors + semiKg,
-                  propellant: current.stockpile.propellant + propellantKg,
-                  silicates: current.stockpile.silicates + silicatesKg
-                },
-                debris: current.debris.map((item) =>
-                  item.id === target.id
-                    ? { ...item, status: "recovered", position: depotPos }
-                    : item
-                ),
-                drones: current.drones.map((d) =>
-                  d.id === droneId
-                    ? {
-                        ...d,
-                        status: "recovered",
-                        subStatus: "docking",
-                        position: depotPos,
-                        fuel: newFuel,
-                        payload: 0,
-                        targetId: null,
-                        flight: undefined
-                      }
-                    : d
-                )
-              };
-            });
-
-            // After 1.2s: Soft capture complete, moored at berth
+            // Step 4B: Ingestion & Smelting Plasma Flash after 900ms
             setTimeout(() => {
+              const formattedVal = formatLogValue(target.value);
+              const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
+              const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
+              const semiKg = Math.round(target.mass * (target.assay.semiconductor / 100));
+              const propellantKg = Math.round(target.mass * (target.assay.propellant / 100));
+              const silicatesKg = Math.round(target.mass * (target.assay.silicates / 100));
+
               get().addLog(
-                `${droneId} MOORED AT BERTH ${bestDrone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
+                `${target.id} REFINED & SMELTED // +${target.mass} kg // +${formattedVal} // Ti: +${titaniumKg}kg, Pt: +${preciousKg}kg, Si: +${semiKg}kg, FUEL: +${propellantKg}kg`,
                 "success"
               );
-              set((current) => ({
-                drones: current.drones.map((d) =>
-                  d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
-                )
-              }));
-            }, 1200);
+              get().addLog(
+                `${droneId} CLEARED FROM REFINERY // ASCENDING TO BERTH ${bestDrone.berthId}`,
+                "action"
+              );
+
+              set((current) => {
+                const thisDrone = current.drones.find((d) => d.id === droneId);
+                const baseFuel = thisDrone
+                  ? Math.max(0, Math.round((thisDrone.fuel - chosenFuelCost) * 10) / 10)
+                  : 0;
+
+                // In-situ propellant recycling
+                const refuelBonus = Math.min(30, Math.round(propellantKg * 0.75));
+                const newFuel = Math.min(100, Math.round((baseFuel + refuelBonus) * 10) / 10);
+
+                return {
+                  totalRecoveredMass: current.totalRecoveredMass + target.mass,
+                  totalRecoveredValue: current.totalRecoveredValue + target.value,
+                  lastSmeltedAt: Date.now(),
+                  stockpile: {
+                    titanium: current.stockpile.titanium + titaniumKg,
+                    preciousMetals: current.stockpile.preciousMetals + preciousKg,
+                    semiconductors: current.stockpile.semiconductors + semiKg,
+                    propellant: current.stockpile.propellant + propellantKg,
+                    silicates: current.stockpile.silicates + silicatesKg
+                  },
+                  debris: current.debris.map((item) =>
+                    item.id === target.id
+                      ? {
+                          ...item,
+                          status: "recovered",
+                          subStatus: "smelted",
+                          position: getSmeltingIntakePosition(depot.position)
+                        }
+                      : item
+                  ),
+                  drones: current.drones.map((d) =>
+                    d.id === droneId
+                      ? {
+                          ...d,
+                          status: "recovered",
+                          subStatus: "docking",
+                          position: smeltingStandOff,
+                          fuel: newFuel,
+                          targetId: null
+                        }
+                      : d
+                  )
+                };
+              });
+
+              // Step 5: Smooth Berth Approach & Magnetic Mooring after 1200ms
+              setTimeout(() => {
+                get().addLog(
+                  `${droneId} MOORED AT BERTH ${bestDrone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
+                  "success"
+                );
+                set((current) => ({
+                  drones: current.drones.map((d) =>
+                    d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
+                  )
+                }));
+              }, 1200);
+            }, 900);
           }, returnDurationMs);
         }, 1000);
-      }, 800);
+      }, 900);
     }, interceptDurationMs);
 
     return true;

@@ -459,6 +459,46 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
   margin-left: auto;
 }
 
+/* Real-Time Debris Extraction Pipeline Ribbon */
+.extraction-pipeline-card {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(0, 255, 255, 0.25);
+}
+.extraction-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.pipeline-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  font: 600 8px "JetBrains Mono", monospace;
+  letter-spacing: .02em;
+  border-width: 1px;
+  border-style: solid;
+  transition: all 0.25s ease;
+}
+.pipeline-step.is-active {
+  box-shadow: 0 0 10px rgba(255, 191, 0, 0.35);
+}
+.pipeline-step.is-complete {
+  opacity: 0.9;
+}
+.step-icon {
+  font-weight: 700;
+  font-size: 9px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 1100px) {
   .hud-grid { grid-template-columns: 260px 1fr 280px; gap: 12px; padding-inline: 14px; }

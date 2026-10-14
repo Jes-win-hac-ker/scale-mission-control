@@ -20,6 +20,8 @@ import {
   getOrbitalArcPoint,
   getOrbitalArcSamples,
   getOrbitalArcTangent,
+  getSmeltingIntakePosition,
+  getSmeltingStandOffPosition,
   getStationRingAngle,
   STATION_RING_ROTATION_SPEED
 } from "@/lib/orbital";
@@ -562,13 +564,17 @@ function DroneMesh({
     }
   }, [drone.status]);
 
-  // Carried debris when actively capturing or returning payload to Docking Station
+  // Carried debris when actively clamping in claws or returning payload to Docking Station
   const carriedDebris = useMemo(() => {
-    if (!drone.targetId || (drone.status !== "capturing" && drone.status !== "returning")) {
-      return null;
+    if (!drone.targetId) return null;
+    if (
+      (drone.status === "capturing" && drone.subStatus === "clamping") ||
+      (drone.status === "returning" && drone.subStatus === "towing")
+    ) {
+      return debrisList.find((d) => d.id === drone.targetId) || null;
     }
-    return debrisList.find((d) => d.id === drone.targetId) || null;
-  }, [drone.targetId, drone.status, debrisList]);
+    return null;
+  }, [drone.targetId, drone.status, drone.subStatus, debrisList]);
 
   const isDocked = drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked";
 
@@ -630,23 +636,59 @@ function DroneMesh({
         }
       }
     } else if (drone.status === "capturing") {
-      // 2. Target Rendezvous & Capturing: Spin-matching & Clamping
-      groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
-      if (modelRef.current) {
+      // 2. Co-Orbital Target Rendezvous & Active Extraction: Detumble & Clamping
+      const targetDebris = drone.targetId ? debrisList.find((d) => d.id === drone.targetId) : null;
+      if (targetDebris) {
+        const dPos = getDebrisOrbitalPosition(targetDebris, clock.elapsedTime);
+        const dVec = new THREE.Vector3(...dPos);
+        const outward = dVec.clone().normalize();
+
         if (drone.subStatus === "detumbling") {
-          // Spin-matching detumble synchronization with tumbling space debris
-          modelRef.current.rotation.x = Math.sin(clock.elapsedTime * 2.8) * 0.35;
-          modelRef.current.rotation.y += 0.038;
-          modelRef.current.rotation.z = Math.cos(clock.elapsedTime * 2.2) * 0.28;
+          // Drone stands off along outward vector (0.09m), facing target with tractor beam
+          const standOff = dVec.clone().addScaledVector(outward, 0.09);
+          groupRef.current.position.set(standOff.x, standOff.y, standOff.z);
+          if (modelRef.current) {
+            modelRef.current.lookAt(dVec);
+            // Spin-matching attitude micro-adjustments
+            modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 9) * 0.06;
+          }
         } else {
-          // Clamping: Stabilize rigid body orientation
-          modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.08);
-          modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.08);
-          modelRef.current.rotation.y += 0.008;
+          // Clamping: Latched in rigid contact with target
+          groupRef.current.position.set(dPos[0], dPos[1], dPos[2]);
+          if (modelRef.current) {
+            modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.1);
+            modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.1);
+          }
         }
+      } else {
+        groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
+      }
+    } else if (drone.subStatus === "ingesting") {
+      // 3. Underside Refinery Ingestion Stand-off: holding below station intake
+      const standOff = getSmeltingStandOffPosition(depot.position);
+      groupRef.current.position.set(standOff[0], standOff[1], standOff[2]);
+      if (modelRef.current) {
+        // Face upwards toward the smelting reactor funnel
+        const intake = getSmeltingIntakePosition(depot.position);
+        modelRef.current.lookAt(new THREE.Vector3(...intake));
+      }
+    } else if (drone.subStatus === "docking") {
+      // 4. Ascent from Refinery Stand-off to Assigned Berth
+      const ringAngle = getStationRingAngle(clock.elapsedTime);
+      const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
+      groupRef.current.position.lerp(new THREE.Vector3(...berthPos), 0.08);
+
+      if (modelRef.current) {
+        const normal = getBerthOutwardNormal(drone.berthId, ringAngle);
+        const lookTarget = new THREE.Vector3(
+          berthPos[0] + normal[0],
+          berthPos[1] + normal[1],
+          berthPos[2] + normal[2]
+        );
+        modelRef.current.lookAt(lookTarget);
       }
     } else {
-      // 3. Docked at Station Berths: Synchronize with station ring rotation
+      // 5. Docked at Station Berths: Synchronize with station ring rotation
       const ringAngle = getStationRingAngle(clock.elapsedTime);
       const berthPos = getBerthWorldPosition(drone.berthId, depot.position, ringAngle);
       groupRef.current.position.set(berthPos[0], berthPos[1], berthPos[2]);
@@ -1069,11 +1111,16 @@ function DebrisMesh({
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
 
+  const depot = useMissionStore((state) => state.depot);
+
   // Status-based color mapping per prompt requirements:
   // - Targeted debris: amber
   // - Captured debris: green
   // - Available debris: red
   const color = useMemo(() => {
+    if (debris.subStatus === "ingesting") {
+      return "#FFAA00";
+    }
     switch (debris.status) {
       case "available":
         return "#FF0033"; // red
@@ -1085,7 +1132,7 @@ function DebrisMesh({
       default:
         return "#FF0033";
     }
-  }, [debris.status]);
+  }, [debris.status, debris.subStatus]);
 
   // Unique tumbling rate & axes for each debris object
   const spinVector = useMemo(() => {
@@ -1109,12 +1156,27 @@ function DebrisMesh({
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
 
-    // When captured and drone is returning, debris position follows drone along curved orbital arc
-    if (
+    if (debris.subStatus === "ingesting") {
+      // 1. Smelting Vortex Ingestion: Debris floats upwards from stand-off into intake core
+      const intakePos = getSmeltingIntakePosition(depot.position);
+      const standOff = getSmeltingStandOffPosition(depot.position);
+
+      const curY = groupRef.current.position.y;
+      groupRef.current.position.x = standOff[0];
+      groupRef.current.position.z = standOff[2];
+      groupRef.current.position.y = THREE.MathUtils.lerp(curY, intakePos[1] + 0.12, 0.08);
+
+      if (visualRef.current) {
+        visualRef.current.rotation.y += 0.22;
+        visualRef.current.rotation.x += 0.12;
+        visualRef.current.scale.multiplyScalar(0.975);
+      }
+    } else if (
       debris.status === "captured" &&
       assignedDrone?.flight &&
       assignedDrone.status === "returning"
     ) {
+      // 2. Inbound flight following carrier drone
       const elapsed = (Date.now() - assignedDrone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / assignedDrone.flight.duration));
       const eased = easeInOutQuad(progress);
@@ -1125,35 +1187,38 @@ function DebrisMesh({
         eased
       );
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
-    } else if (debris.status === "recovered") {
+    } else if (debris.status === "recovered" || debris.subStatus === "smelted") {
       groupRef.current.position.set(debris.position[0], debris.position[1], debris.position[2]);
     } else {
-      // Continuous Keplerian orbital motion around Earth
-      const pos = getDebrisOrbitalPosition(debris, Date.now() / 1000);
+      // 3. Continuous Keplerian orbital motion around Earth
+      const pos = getDebrisOrbitalPosition(debris, clock.elapsedTime);
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
-    }
 
-    // Natural multi-axis tumbling rotation
-    if (visualRef.current) {
-      visualRef.current.rotation.x += spinVector[0];
-      visualRef.current.rotation.y += spinVector[1];
-      visualRef.current.rotation.z += spinVector[2];
+      // Natural multi-axis tumbling rotation, dampened when detumbling
+      if (visualRef.current) {
+        const damp = debris.subStatus === "detumbling" ? 0.2 : 1.0;
+        visualRef.current.rotation.x += spinVector[0] * damp;
+        visualRef.current.rotation.y += spinVector[1] * damp;
+        visualRef.current.rotation.z += spinVector[2] * damp;
 
-      if (selected) {
-        const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.18;
-        visualRef.current.scale.setScalar(pulse);
-      } else {
-        visualRef.current.scale.setScalar(1);
+        if (selected) {
+          const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.18;
+          visualRef.current.scale.setScalar(pulse);
+        } else {
+          visualRef.current.scale.setScalar(1);
+        }
       }
     }
   });
 
-  // When recovered or actively carried in drone claws during capture/return, hide independent orbit mesh
+  // Hide independent orbit mesh only when clamped/towed in drone claws or fully smelted:
   if (
     debris.status === "recovered" ||
+    debris.subStatus === "smelted" ||
     (debris.status === "captured" &&
+      debris.subStatus !== "ingesting" &&
       assignedDrone &&
-      (assignedDrone.status === "returning" || assignedDrone.status === "capturing"))
+      (assignedDrone.status === "returning" || assignedDrone.subStatus === "clamping"))
   ) {
     return null;
   }
@@ -1179,11 +1244,37 @@ function DebrisMesh({
         <DebrisShape
           material={debris.material}
           color={color}
-          wireframe={debris.status === "targeted"}
-          opacity={0.98}
+          wireframe={debris.status === "targeted" && debris.subStatus !== "detumbling"}
+          opacity={debris.subStatus === "ingesting" ? 0.85 : 0.98}
           scale={baseScale}
         />
       </group>
+
+      {/* Tractor Field Containment Cage during Active Detumble */}
+      {debris.subStatus === "detumbling" && (
+        <mesh>
+          <sphereGeometry args={[baseScale * 2.2, 12, 12]} />
+          <meshBasicMaterial
+            color="#00FFFF"
+            wireframe
+            transparent
+            opacity={0.65}
+          />
+        </mesh>
+      )}
+
+      {/* Electromagnetic Ingestion Field during ISRU Smelting */}
+      {debris.subStatus === "ingesting" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[baseScale * 1.2, baseScale * 2.0, 16]} />
+          <meshBasicMaterial
+            color="#FFAA00"
+            transparent
+            opacity={0.85}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
 
       {/* Interactive Raycastable Click Hitbox */}
       <mesh
@@ -1350,6 +1441,15 @@ function OrbitalScene() {
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
       return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+    }
+    if (drone.status === "capturing" && drone.targetId) {
+      const target = debris.find((d) => d.id === drone.targetId);
+      if (target) {
+        return getDebrisOrbitalPosition(target, Date.now() / 1000);
+      }
+    }
+    if (drone.subStatus === "ingesting") {
+      return getSmeltingStandOffPosition(depot.position);
     }
     if (drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked") {
       const ringAngle = getStationRingAngle(Date.now() / 1000);

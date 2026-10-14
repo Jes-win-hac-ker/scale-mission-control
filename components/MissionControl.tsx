@@ -517,6 +517,80 @@ export default function MissionControl() {
                   </div>
                 </div>
 
+                {/* Real-time Extraction & Retrieval Pipeline Ribbon */}
+                {selected.status !== "available" && (
+                  <div className="extraction-pipeline-card">
+                    <div className="extraction-header">
+                      <span className="text-[10px] font-mono tracking-wider text-cyan font-bold">
+                        EXTRACTION & RETRIEVAL PIPELINE
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-400">
+                        {assignedDrone
+                          ? `UNIT: ${assignedDrone.id} [${assignedDrone.berthId}] · ${
+                              assignedDrone.subStatus
+                                ? assignedDrone.subStatus.toUpperCase()
+                                : assignedDrone.status.toUpperCase()
+                            }`
+                          : "SWARM EN ROUTE"}
+                      </span>
+                    </div>
+                    <div className="pipeline-steps">
+                      {[
+                        {
+                          key: "rendezvous",
+                          label: "1. RENDEZVOUS",
+                          active:
+                            selected.status === "targeted" &&
+                            (!assignedDrone || assignedDrone.status === "intercepting")
+                        },
+                        {
+                          key: "detumble",
+                          label: "2. DETUMBLE & CLAMP",
+                          active: assignedDrone?.status === "capturing"
+                        },
+                        {
+                          key: "tow",
+                          label: "3. INBOUND TOW",
+                          active: assignedDrone?.status === "returning"
+                        },
+                        {
+                          key: "smelt",
+                          label: "4. ISRU SMELT & MOOR",
+                          active:
+                            selected.status === "recovered" ||
+                            assignedDrone?.subStatus === "ingesting" ||
+                            assignedDrone?.subStatus === "docking"
+                        }
+                      ].map((step) => {
+                        const isPast =
+                          (step.key === "rendezvous" &&
+                            (assignedDrone?.status === "capturing" ||
+                              assignedDrone?.status === "returning" ||
+                              selected.status === "recovered")) ||
+                          (step.key === "detumble" &&
+                            (assignedDrone?.status === "returning" ||
+                              selected.status === "recovered")) ||
+                          (step.key === "tow" && selected.status === "recovered");
+                        return (
+                          <div
+                            key={step.key}
+                            className={`pipeline-step ${
+                              step.active
+                                ? "is-active text-amber border-amber/60 bg-amber/10"
+                                : isPast
+                                ? "is-complete text-emerald-400 border-emerald-500/40 bg-emerald-950/20"
+                                : "text-slate-500 border-slate-700/40 bg-slate-900/30"
+                            }`}
+                          >
+                            <span className="step-icon">{isPast ? "✓" : step.active ? "▶" : "·"}</span>
+                            <span>{step.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Material Spectroscopy Assay Bar */}
                 {selected.assay && (
                   <div className="assay-card">
