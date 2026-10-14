@@ -119,10 +119,41 @@ function OrbitalRecoveryStation({
         <pointLight color="#00FFCC" intensity={1.8} distance={2.5} />
       </group>
 
-      {/* 3. Counter-Rotating Toroidal Habitat Ring */}
-      <group ref={ringRef}>
-        {/* Outer Torus */}
-        <mesh>
+      {/* 3. Elevated Articulating Solar Array Wings (y = +0.18, completely clear of ring and berths) */}
+      <group position={[0, 0.18, 0]}>
+        {/* Continuous Structural Boom through Central Hub */}
+        <mesh rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.008, 0.008, 0.88, 8]} />
+          <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
+        </mesh>
+        {/* Port Solar Wing Panel */}
+        <group position={[-0.42, 0, 0]}>
+          <mesh>
+            <boxGeometry args={[0.32, 0.008, 0.12]} />
+            <meshStandardMaterial
+              color="#1e3a8a"
+              metalness={0.9}
+              roughness={0.15}
+            />
+          </mesh>
+        </group>
+        {/* Starboard Solar Wing Panel */}
+        <group position={[0.42, 0, 0]}>
+          <mesh>
+            <boxGeometry args={[0.32, 0.008, 0.12]} />
+            <meshStandardMaterial
+              color="#1e3a8a"
+              metalness={0.9}
+              roughness={0.15}
+            />
+          </mesh>
+        </group>
+      </group>
+
+      {/* 4. Horizontal Counter-Rotating Toroidal Habitat Ring & Mooring Berths */}
+      <group ref={ringRef} position={[0, 0, 0]}>
+        {/* Equatorial Torus (rotated Math.PI/2 to lie horizontally around Y axis) */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.36, 0.024, 16, 64]} />
           <meshStandardMaterial
             color="#475569"
@@ -130,8 +161,8 @@ function OrbitalRecoveryStation({
             roughness={0.3}
           />
         </mesh>
-        {/* Habitation Ring Edge Neon Strips */}
-        <mesh scale={1.03}>
+        {/* Torus Edge Neon Trim Ring */}
+        <mesh rotation={[Math.PI / 2, 0, 0]} scale={1.03}>
           <torusGeometry args={[0.36, 0.008, 8, 32]} />
           <meshBasicMaterial
             color="#00FFFF"
@@ -140,96 +171,62 @@ function OrbitalRecoveryStation({
             toneMapped={false}
           />
         </mesh>
-        {/* 4 Structural Spoke Trusses */}
+
+        {/* 4 Continuous Structural Spoke Trusses (spanning across the hub to the ring) */}
         <mesh rotation={[0, 0, 0]}>
-          <boxGeometry args={[0.72, 0.014, 0.018]} />
+          <boxGeometry args={[0.76, 0.014, 0.02]} />
           <meshStandardMaterial color="#64748b" metalness={0.85} roughness={0.25} />
         </mesh>
         <mesh rotation={[0, Math.PI / 2, 0]}>
-          <boxGeometry args={[0.72, 0.014, 0.018]} />
+          <boxGeometry args={[0.76, 0.014, 0.02]} />
           <meshStandardMaterial color="#64748b" metalness={0.85} roughness={0.25} />
         </mesh>
+
+        {/* 4 Outer-Rim Drone Mooring Berths mounted directly at spoke ends (radius = 0.38) */}
+        {[
+          { id: "B1", pos: [0.38, 0, 0], rot: [0, 0, -Math.PI / 2] },
+          { id: "B2", pos: [-0.38, 0, 0], rot: [0, 0, Math.PI / 2] },
+          { id: "B3", pos: [0, 0, 0.38], rot: [Math.PI / 2, 0, 0] },
+          { id: "B4", pos: [0, 0, -0.38], rot: [-Math.PI / 2, 0, 0] }
+        ].map((berth) => (
+          <group
+            key={berth.id}
+            position={berth.pos as [number, number, number]}
+            rotation={berth.rot as [number, number, number]}
+          >
+            {/* Magnetic Mooring Cradle Base */}
+            <mesh>
+              <cylinderGeometry args={[0.045, 0.05, 0.02, 12]} />
+              <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
+            </mesh>
+            {/* Docking Target Ring */}
+            <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.025, 0.038, 16]} />
+              <meshBasicMaterial
+                color={activeIncoming ? "#FFBF00" : "#00FF66"}
+                transparent
+                opacity={0.85}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+            {/* Approach Guide Micro-Lights */}
+            <mesh position={[0.032, 0.015, 0]}>
+              <sphereGeometry args={[0.005, 8, 8]} />
+              <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
+            </mesh>
+            <mesh position={[-0.032, 0.015, 0]}>
+              <sphereGeometry args={[0.005, 8, 8]} />
+              <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
+            </mesh>
+          </group>
+        ))}
       </group>
 
-      {/* 4. Articulating Solar Array Wings */}
-      <group position={[0, 0.02, 0]}>
-        {/* Port Solar Wing */}
-        <group position={[-0.58, 0, 0]}>
-          <mesh>
-            <boxGeometry args={[0.36, 0.008, 0.14]} />
-            <meshStandardMaterial
-              color="#1e3a8a"
-              metalness={0.9}
-              roughness={0.15}
-            />
-          </mesh>
-          <mesh position={[0.19, 0, 0]}>
-            <cylinderGeometry args={[0.01, 0.01, 0.04, 8]} />
-            <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
-          </mesh>
-        </group>
-        {/* Starboard Solar Wing */}
-        <group position={[0.58, 0, 0]}>
-          <mesh>
-            <boxGeometry args={[0.36, 0.008, 0.14]} />
-            <meshStandardMaterial
-              color="#1e3a8a"
-              metalness={0.9}
-              roughness={0.15}
-            />
-          </mesh>
-          <mesh position={[-0.19, 0, 0]}>
-            <cylinderGeometry args={[0.01, 0.01, 0.04, 8]} />
-            <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
-          </mesh>
-        </group>
-      </group>
-
-      {/* 5. Four Cantilever Drone Mooring Berths (N, S, E, W) */}
-      {[
-        { id: "B1", pos: [0.46, -0.04, 0], rot: [0, 0, 0] },
-        { id: "B2", pos: [-0.46, -0.04, 0], rot: [0, Math.PI, 0] },
-        { id: "B3", pos: [0, -0.04, 0.46], rot: [0, -Math.PI / 2, 0] },
-        { id: "B4", pos: [0, -0.04, -0.46], rot: [0, Math.PI / 2, 0] }
-      ].map((berth) => (
-        <group key={berth.id} position={berth.pos as [number, number, number]} rotation={berth.rot as [number, number, number]}>
-          {/* Berth Cantilever Arm */}
-          <mesh position={[-0.04, 0, 0]}>
-            <boxGeometry args={[0.1, 0.016, 0.024]} />
-            <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.3} />
-          </mesh>
-          {/* Magnetic Mooring Cradle */}
-          <mesh position={[0.02, 0, 0]}>
-            <cylinderGeometry args={[0.045, 0.05, 0.018, 12]} />
-            <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
-          </mesh>
-          {/* Docking Target Ring */}
-          <mesh position={[0.02, 0.011, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.025, 0.038, 16]} />
-            <meshBasicMaterial
-              color={activeIncoming ? "#FFBF00" : "#00FF66"}
-              transparent
-              opacity={0.85}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-          {/* Approach Guide Micro-Lights */}
-          <mesh position={[0.02, 0.015, 0.035]}>
-            <sphereGeometry args={[0.005, 8, 8]} />
-            <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
-          </mesh>
-          <mesh position={[0.02, 0.015, -0.035]}>
-            <sphereGeometry args={[0.005, 8, 8]} />
-            <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* 6. Underside Salvage De-Orbit & Smelting Intake Chute */}
-      <group position={[0, -0.22, 0]}>
+      {/* 5. Underside Salvage De-Orbit & Smelting Intake Chute (anchored flush to cylinder bottom at y = -0.21) */}
+      <group position={[0, -0.21, 0]}>
         {/* Inverted Conical Smelting Funnel */}
-        <mesh rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.16, 0.12, 16, 1, true]} />
+        <mesh position={[0, -0.06, 0]} rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[0.15, 0.12, 16, 1, true]} />
           <meshStandardMaterial
             color="#334155"
             metalness={0.85}
@@ -238,13 +235,13 @@ function OrbitalRecoveryStation({
           />
         </mesh>
         {/* Electromagnetic Containment Ring */}
-        <mesh position={[0, -0.07, 0]}>
-          <torusGeometry args={[0.165, 0.014, 8, 32]} />
+        <mesh position={[0, -0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.155, 0.014, 8, 32]} />
           <meshBasicMaterial color="#00FFFF" toneMapped={false} />
         </mesh>
         {/* Pulsing Processing Field Beam */}
-        <mesh ref={intakePulseRef} position={[0, -0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.155, 24]} />
+        <mesh ref={intakePulseRef} position={[0, -0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.145, 24]} />
           <meshBasicMaterial
             color={activeIncoming ? "#00FF66" : "#00FFFF"}
             transparent
