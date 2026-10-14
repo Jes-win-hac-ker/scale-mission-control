@@ -199,13 +199,13 @@ export default function MissionControl() {
     return calculateFuelBurn(minDroneDist, distToDepot, selected.mass);
   }, [selected, depot.position, drones]);
 
-  const [liveSec, setLiveSec] = useState(() => Date.now() / 1000);
+  const [liveSec, setLiveSec] = useState(() => (Date.now() - missionStartedAt) / 1000);
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setLiveSec(Date.now() / 1000);
+      setLiveSec((Date.now() - missionStartedAt) / 1000);
     }, 150);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [missionStartedAt]);
 
   const assignedDrone = useMemo(() => {
     return drones.find(

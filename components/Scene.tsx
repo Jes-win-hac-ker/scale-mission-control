@@ -1926,13 +1926,8 @@ function OrbitalScene() {
     return () => window.removeEventListener("scale:zoom", handleZoom);
   }, []);
 
-  // Real-time flight position calculator for drones along curved transfer arcs and docked berths
-  const getDroneRealtimePos = (drone: Drone): [number, number, number] => {
-    return getDroneWorldPosition(drone, depot.position, Date.now() / 1000, debris);
-  };
-
   // Frame-by-frame camera focus & dynamic follow tracking loop
-  useFrame(() => {
+  useFrame(({ clock }) => {
     const controls = controlsRef.current;
     if (!controls) return;
 
@@ -1952,12 +1947,12 @@ function OrbitalScene() {
             (d) => d.targetId === item.id && (d.status === "returning" || d.status === "capturing")
           );
           if (carrierDrone) {
-            const pos = getDroneRealtimePos(carrierDrone);
+            const pos = getDroneWorldPosition(carrierDrone, depot.position, clock.elapsedTime, debris);
             targetVec.set(pos[0], pos[1], pos[2]);
             targetDistance = 0.65;
           } else {
-            // Real-time Keplerian orbital position
-            const pos = getDebrisOrbitalPosition(item, Date.now() / 1000);
+            // Real-time Keplerian orbital position of the actual 3D debris object
+            const pos = getDebrisOrbitalPosition(item, clock.elapsedTime);
             targetVec.set(pos[0], pos[1], pos[2]);
             targetDistance = 0.85;
           }
@@ -1966,7 +1961,7 @@ function OrbitalScene() {
     } else if (focusedEntity.type === "drone") {
       const drone = drones.find((d) => d.id === focusedEntity.id);
       if (drone) {
-        const pos = getDroneRealtimePos(drone);
+        const pos = getDroneWorldPosition(drone, depot.position, clock.elapsedTime, debris);
         targetVec.set(pos[0], pos[1], pos[2]);
         targetDistance = 0.55;
       }
@@ -1984,23 +1979,30 @@ function OrbitalScene() {
     }
 
     if (isTransitioningRef.current) {
-      // Smoothly transition orbit pivot target to the entity
-      controls.target.lerp(targetVec, 0.08);
+      // Smoothly transition orbit pivot target to the exact entity coordinates
+      controls.target.lerp(targetVec, 0.12);
 
       // Smoothly adjust framing distance along camera view line
       const currentDist = camera.position.distanceTo(controls.target);
-      const viewDir = camera.position.clone().sub(controls.target).normalize();
+      let viewDir = camera.position.clone().sub(controls.target).normalize();
       if (viewDir.lengthSq() < 0.001) {
-        viewDir.set(0, 0.2, 1).normalize();
+        viewDir.set(0, 0.35, 1).normalize();
       }
 
-      const nextDist = THREE.MathUtils.lerp(currentDist, targetDistance, 0.08);
+      // When focusing on orbital entities (debris or drone), smoothly blend towards an elevated outward vantage
+      if (focusedEntity.type === "debris" || focusedEntity.type === "drone") {
+        const outward = targetVec.clone().normalize();
+        const preferredDir = outward.clone().add(new THREE.Vector3(0, 0.4, 0)).normalize();
+        viewDir.lerp(preferredDir, 0.05).normalize();
+      }
+
+      const nextDist = THREE.MathUtils.lerp(currentDist, targetDistance, 0.10);
       camera.position.copy(controls.target).add(viewDir.multiplyScalar(nextDist));
 
       // Transition completes when camera framing and target alignment are close
       if (
-        Math.abs(currentDist - targetDistance) < 0.03 &&
-        controls.target.distanceTo(targetVec) < 0.03
+        Math.abs(currentDist - targetDistance) < 0.06 &&
+        controls.target.distanceTo(targetVec) < 0.06
       ) {
         isTransitioningRef.current = false;
         lastTrackedPosRef.current.copy(targetVec);
@@ -2014,7 +2016,7 @@ function OrbitalScene() {
       // Dampen any residual drift between controls.target and actual entity position
       const drift = targetVec.clone().sub(controls.target);
       if (drift.lengthSq() > 0.000001) {
-        const correction = drift.multiplyScalar(0.1);
+        const correction = drift.multiplyScalar(0.25);
         controls.target.add(correction);
         camera.position.add(correction);
       }

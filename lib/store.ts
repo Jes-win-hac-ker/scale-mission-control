@@ -416,7 +416,8 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     let chosenFuelCost = 0;
 
     // Real-time orbital position of target satellite at moment of dispatch
-    const currentDebrisPos = getDebrisOrbitalPosition(target, Date.now() / 1000);
+    const simTime = (Date.now() - get().missionStartedAt) / 1000;
+    const currentDebrisPos = getDebrisOrbitalPosition(target, simTime);
     const distDebrisDepot = distance(currentDebrisPos, depot.position);
 
     if (preferredDroneId) {
@@ -475,7 +476,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const droneId = bestDrone.id;
     let currentDronePos = bestDrone.position;
     if (bestDrone.status === "idle" || bestDrone.subStatus === "docked") {
-      const ringAngle = getStationRingAngle(Date.now() / 1000);
+      const ringAngle = getStationRingAngle(simTime);
       currentDronePos = getBerthWorldPosition(bestDrone.berthId, depot.position, ringAngle);
     }
     const droneSpeed = bestDrone.speed || 1.2;
@@ -485,7 +486,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const rendezvous = calculateRendezvousTrajectory(
       currentDronePos,
       target,
-      Date.now() / 1000,
+      simTime,
       droneSpeed
     );
     const interceptDurationSec = rendezvous.durationSec;
@@ -572,7 +573,8 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         setTimeout(() => {
           get().addLog(`${droneId} TOWING ${target.id} // INBOUND DESCENT TO DEPOT-01 ISRU REFINERY`, "action");
 
-          const realTimeCapturePos = getDebrisOrbitalPosition(target, Date.now() / 1000);
+          const simTime = (Date.now() - get().missionStartedAt) / 1000;
+          const realTimeCapturePos = getDebrisOrbitalPosition(target, simTime);
 
           set((current) => ({
             debris: current.debris.map((item) =>
