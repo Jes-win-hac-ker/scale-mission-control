@@ -10,6 +10,7 @@ import {
   formatLogValue,
   useMissionStore
 } from "@/lib/store";
+import { calculateFuelBurn } from "@/lib/algorithms";
 
 const debrisStatusTone: Record<DebrisStatus, string> = {
   available: "text-crimson border-crimson/50 bg-crimson/10",
@@ -66,6 +67,9 @@ export default function MissionControl() {
     focusEntity,
     totalRecoveredMass,
     totalRecoveredValue,
+    stockpile,
+    swarmStrategy,
+    setSwarmStrategy,
     missionStartedAt,
     logs,
     warning,
@@ -119,19 +123,18 @@ export default function MissionControl() {
     window.dispatchEvent(new CustomEvent("scale:zoom", { detail: direction }));
   };
 
-  // Estimated fuel cost to recover selected debris:
-  // distance(bestDrone.pos, selected.pos) + distance(selected.pos, depot.pos)
+  // Tsiolkovsky mass-dependent fuel calculation
   const estimatedRecoveryFuel = useMemo(() => {
     if (!selected) return 0;
     const distToDepot = distance(selected.position, depot.position);
     const idleDrones = drones.filter((d) => d.status === "idle");
     if (idleDrones.length === 0) {
-      return Number(distToDepot.toFixed(1));
+      return calculateFuelBurn(1.5, distToDepot, selected.mass);
     }
     const minDroneDist = Math.min(
       ...idleDrones.map((d) => distance(d.position, selected.position))
     );
-    return Number((minDroneDist + distToDepot).toFixed(1));
+    return calculateFuelBurn(minDroneDist, distToDepot, selected.mass);
   }, [selected, depot.position, drones]);
 
   const assignedDrone = drones.find((d) => d.targetId === selected?.id);
@@ -231,6 +234,36 @@ export default function MissionControl() {
               </span>
             </div>
           </div>
+
+          {/* DEPOT-01 ISRU Smelter & Material Stockpile */}
+          <div className="stockpile-card">
+            <div className="stockpile-header">
+              <span className="text-[9px] tracking-wider text-cyan font-mono font-semibold">DEPOT-01 ISRU REFINERY</span>
+              <span className="text-[8px] text-emerald-400 font-mono font-bold tracking-widest">SMELTER ACTIVE</span>
+            </div>
+            <div className="stockpile-grid">
+              <div className="stockpile-item">
+                <span className="tag-dot" style={{ background: "#38bdf8" }} />
+                <span className="text-slate-400">Ti ALLOY:</span>
+                <strong className="text-sky-300 font-mono">{stockpile.titanium} kg</strong>
+              </div>
+              <div className="stockpile-item">
+                <span className="tag-dot" style={{ background: "#fbbf24" }} />
+                <span className="text-slate-400">PRECIOUS:</span>
+                <strong className="text-amber-300 font-mono">{stockpile.preciousMetals} kg</strong>
+              </div>
+              <div className="stockpile-item">
+                <span className="tag-dot" style={{ background: "#c084fc" }} />
+                <span className="text-slate-400">SILICON:</span>
+                <strong className="text-purple-300 font-mono">{stockpile.semiconductors} kg</strong>
+              </div>
+              <div className="stockpile-item">
+                <span className="tag-dot" style={{ background: "#22c55e" }} />
+                <span className="text-slate-400">RECYCLED:</span>
+                <strong className="text-emerald-400 font-mono">{stockpile.propellant} kg</strong>
+              </div>
+            </div>
+          </div>
         </aside>
 
         {/* CENTER CONSOLE: Viewport Controls, Target Card & GO-FETCH Dispatch */}
@@ -328,14 +361,69 @@ export default function MissionControl() {
                   <strong className="text-amber">{formatMoney(selected.value)}</strong>
                 </div>
                 <div className="meta-cell">
-                  <span className="cell-label">EST. FUEL COST</span>
-                  <strong>{estimatedRecoveryFuel} units</strong>
+                  <span className="cell-label">Δv BUDGET (TRANSFER)</span>
+                  <strong className="text-cyan">{(selected.deltaVBudget ?? 1850).toLocaleString()} m/s</strong>
+                </div>
+                <div className="meta-cell">
+                  <span className="cell-label">KESSLER THREAT INDEX</span>
+                  <strong className={(selected.threatIndex ?? 30) > 50 ? "text-amber" : "text-emerald-400"}>
+                    {selected.threatIndex ?? 35} / 100
+                  </strong>
+                </div>
+                <div className="meta-cell">
+                  <span className="cell-label">EST. PROP. BURN</span>
+                  <strong>{estimatedRecoveryFuel} kg</strong>
                 </div>
                 <div className="meta-cell">
                   <span className="cell-label">ASSIGNED UNIT</span>
                   <strong className="text-cyan">
                     {assignedDrone ? assignedDrone.id : "--"}
                   </strong>
+                </div>
+              </div>
+
+              {/* Material Spectroscopy Assay Bar */}
+              {selected.assay && (
+                <div className="assay-card">
+                  <div className="assay-title">
+                    <span>MATERIAL SPECTROSCOPY ASSAY</span>
+                    <span className="text-cyan font-mono">REFINERY TARGETS</span>
+                  </div>
+                  <div className="assay-bar">
+                    <div style={{ width: `${selected.assay.titanium}%`, background: "#38bdf8" }} className="assay-segment" title={`Titanium / Structural: ${selected.assay.titanium}%`} />
+                    <div style={{ width: `${selected.assay.preciousMetals}%`, background: "#fbbf24" }} className="assay-segment" title={`Precious / Platinum: ${selected.assay.preciousMetals}%`} />
+                    <div style={{ width: `${selected.assay.semiconductor}%`, background: "#c084fc" }} className="assay-segment" title={`Silicon / Avionics: ${selected.assay.semiconductor}%`} />
+                    <div style={{ width: `${selected.assay.propellant}%`, background: "#22c55e" }} className="assay-segment" title={`Hydrazine Fuel: ${selected.assay.propellant}%`} />
+                    <div style={{ width: `${selected.assay.silicates}%`, background: "#94a3b8" }} className="assay-segment" title={`Silicates / Slag: ${selected.assay.silicates}%`} />
+                  </div>
+                  <div className="assay-tags">
+                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#38bdf8" }} /> Ti: {selected.assay.titanium}%</span>
+                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#fbbf24" }} /> Pt: {selected.assay.preciousMetals}%</span>
+                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#c084fc" }} /> Si: {selected.assay.semiconductor}%</span>
+                    <span className="assay-tag"><span className="tag-dot" style={{ background: "#22c55e" }} /> Fuel: {selected.assay.propellant}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Swarm Optimization Strategy Selector */}
+              <div className="strategy-selector">
+                <span className="strategy-label">SWARM BRAIN // HUNGARIAN OPTIMIZER:</span>
+                <div className="strategy-buttons">
+                  {[
+                    { id: "balanced", label: "PARETO" },
+                    { id: "max_yield", label: "VALUE" },
+                    { id: "kessler_defense", label: "DEFENSE" },
+                    { id: "min_delta_v", label: "MIN Δv" }
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={`strategy-btn ${swarmStrategy === mode.id ? "is-active" : ""}`}
+                      onClick={() => setSwarmStrategy(mode.id as any)}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -362,10 +450,10 @@ export default function MissionControl() {
                   className="auto-dispatch-btn"
                   disabled={availableDebrisCount === 0 || idleDroneCount === 0}
                   onClick={autoDispatch}
-                  title="Assign all available drones to highest-value debris"
+                  title={`Deploy fleet using ${swarmStrategy.toUpperCase()} matching`}
                 >
                   <span>AUTO DISPATCH</span>
-                  <small>({idleDroneCount} IDLE)</small>
+                  <small>({idleDroneCount} IDLE · {swarmStrategy.toUpperCase()})</small>
                 </button>
               </div>
             </motion.div>
