@@ -1,6 +1,17 @@
 import * as THREE from "three";
 import type { Debris, Drone } from "./store";
 
+// Global unified simulation clock (synchronized directly to Three.js clock.elapsedTime)
+let globalSimTime = 0;
+
+export function setGlobalSimTime(timeSec: number): void {
+  globalSimTime = timeSec;
+}
+
+export function getGlobalSimTime(): number {
+  return globalSimTime;
+}
+
 export interface OrbitalBasis {
   radius: number;
   u: [number, number, number];
@@ -389,11 +400,11 @@ export function getBerthOutwardNormal(
   stationQuat?: THREE.Quaternion
 ): [number, number, number] {
   if (berthId === "STAGING") {
+    const v = new THREE.Vector3(0, 0, 1);
     if (stationQuat) {
-      const v = new THREE.Vector3(0, 1, 0).applyQuaternion(stationQuat);
-      return [v.x, v.y, v.z];
+      v.applyQuaternion(stationQuat);
     }
-    return [0, 1, 0];
+    return [v.x, v.y, v.z];
   }
   const cos = Math.cos(ringRotationY);
   const sin = Math.sin(ringRotationY);
@@ -467,11 +478,17 @@ export function calculateRendezvousTrajectory(
   const t2 = Math.min(5.5, Math.max(1.8, d2 / droneSpeed));
 
   const finalPos = getDebrisOrbitalPosition(debris, startTimeSec + t2);
-  const finalDist = dist3(startPos, finalPos);
+  const outward = new THREE.Vector3(...finalPos).normalize();
+  const standoffPos: [number, number, number] = [
+    finalPos[0] + outward.x * 0.09,
+    finalPos[1] + outward.y * 0.09,
+    finalPos[2] + outward.z * 0.09
+  ];
+  const finalDist = dist3(startPos, standoffPos);
 
   return {
     durationSec: t2,
-    rendezvousPosition: finalPos,
+    rendezvousPosition: standoffPos,
     distance: finalDist
   };
 }
@@ -593,6 +610,69 @@ export function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+// Computes exact blended 3D coordinates for drones in transit with continuous boundary alignment
+export function calculateBlendedDroneFlightPosition(
+  drone: Drone,
+  timeSec: number,
+  debrisList?: Debris[]
+): [number, number, number] {
+  if (!drone.flight) return drone.position;
+
+  const elapsed = drone.flight.startSimTime !== undefined
+    ? timeSec - drone.flight.startSimTime
+    : (timeSec * 1000 - drone.flight.startTime) / 1000;
+  const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+  const eased = easeInOutQuad(progress);
+
+  const arcPos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+
+  if (drone.status === "intercepting") {
+    // 1. Live moving berth at launch
+    const liveBerth = getBerthWorldPosition(drone.berthId, timeSec);
+    // 2. Live moving target debris standoff at arrival
+    const target = drone.targetId ? debrisList?.find((d) => d.id === drone.targetId) : undefined;
+    const liveDebris = target
+      ? getDebrisOrbitalPosition(target, timeSec)
+      : drone.flight.targetPosition;
+    const outward = new THREE.Vector3(...liveDebris).normalize();
+    const liveTarget: [number, number, number] = [
+      liveDebris[0] + outward.x * 0.09,
+      liveDebris[1] + outward.y * 0.09,
+      liveDebris[2] + outward.z * 0.09
+    ];
+
+    const startBlend = (1 - progress) * (1 - progress);
+    const endBlend = progress * progress;
+
+    return [
+      arcPos[0] + (liveBerth[0] - drone.flight.startPosition[0]) * startBlend + (liveTarget[0] - drone.flight.targetPosition[0]) * endBlend,
+      arcPos[1] + (liveBerth[1] - drone.flight.startPosition[1]) * startBlend + (liveTarget[1] - drone.flight.targetPosition[1]) * endBlend,
+      arcPos[2] + (liveBerth[2] - drone.flight.startPosition[2]) * startBlend + (liveTarget[2] - drone.flight.targetPosition[2]) * endBlend
+    ];
+  }
+
+  if (drone.status === "returning") {
+    // 1. Live moving capture point at start
+    const target = drone.targetId ? debrisList?.find((d) => d.id === drone.targetId) : undefined;
+    const liveCapture = target
+      ? getDebrisOrbitalPosition(target, timeSec)
+      : drone.flight.startPosition;
+    // 2. Live moving smelting standoff at station
+    const liveStandOff = getSmeltingStandOffPosition(timeSec);
+
+    const startBlend = (1 - progress) * (1 - progress);
+    const endBlend = progress * progress;
+
+    return [
+      arcPos[0] + (liveCapture[0] - drone.flight.startPosition[0]) * startBlend + (liveStandOff[0] - drone.flight.targetPosition[0]) * endBlend,
+      arcPos[1] + (liveCapture[1] - drone.flight.startPosition[1]) * startBlend + (liveStandOff[1] - drone.flight.targetPosition[1]) * endBlend,
+      arcPos[2] + (liveCapture[2] - drone.flight.startPosition[2]) * startBlend + (liveStandOff[2] - drone.flight.targetPosition[2]) * endBlend
+    ];
+  }
+
+  return arcPos;
+}
+
 // Real-time flight position calculator for drones along curved transfer arcs and docked berths
 export function getDroneWorldPosition(
   drone: Drone,
@@ -601,30 +681,21 @@ export function getDroneWorldPosition(
   debrisList?: Debris[]
 ): [number, number, number] {
   if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
-    const elapsed = (timeSec * 1000 - drone.flight.startTime) / 1000;
-    const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
-    const eased = easeInOutQuad(progress);
-    const arcPos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
-
-    // If returning to the orbiting station: blend with live moving station standoff coordinate
-    if (drone.status === "returning") {
-      const liveStandOff = getSmeltingStandOffPosition(timeSec);
-      const targetPos = drone.flight.targetPosition;
-      // Quadratic terminal homing blend: 0 at launch, 1.0 at arrival
-      const blend = progress * progress;
-      return [
-        arcPos[0] + (liveStandOff[0] - targetPos[0]) * blend,
-        arcPos[1] + (liveStandOff[1] - targetPos[1]) * blend,
-        arcPos[2] + (liveStandOff[2] - targetPos[2]) * blend
-      ];
-    }
-
-    return arcPos;
+    return calculateBlendedDroneFlightPosition(drone, timeSec, debrisList);
   }
   if (drone.status === "capturing" && drone.targetId) {
     const target = debrisList?.find((d) => d.id === drone.targetId);
     if (target) {
-      return getDebrisOrbitalPosition(target, timeSec);
+      const dPos = getDebrisOrbitalPosition(target, timeSec);
+      if (drone.subStatus === "detumbling") {
+        const outward = new THREE.Vector3(...dPos).normalize();
+        return [
+          dPos[0] + outward.x * 0.09,
+          dPos[1] + outward.y * 0.09,
+          dPos[2] + outward.z * 0.09
+        ];
+      }
+      return dPos;
     }
   }
   if (drone.subStatus === "ingesting") {

@@ -8,6 +8,7 @@ import {
   getBerthWorldPosition,
   getDebrisOrbitalPosition,
   getDepotOrbitalPosition,
+  getGlobalSimTime,
   getSmeltingIntakePosition,
   getSmeltingStandOffPosition,
   getStationOrbitalPosition,
@@ -50,6 +51,7 @@ export type DroneFlight = {
   startPosition: [number, number, number];
   targetPosition: [number, number, number];
   startTime: number;
+  startSimTime?: number;
   duration: number; // in seconds
   fuelCost: number;
   type?: "intercept" | "return" | "docking";
@@ -419,7 +421,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     let chosenFuelCost = 0;
 
     // Real-time orbital position of target satellite and docking station at moment of dispatch
-    const simTime = (Date.now() - get().missionStartedAt) / 1000;
+    const simTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
     const currentDebrisPos = getDebrisOrbitalPosition(target, simTime);
     const currentDepotPos = getStationOrbitalPosition(simTime, depot);
     const distDebrisDepot = distance(currentDebrisPos, currentDepotPos);
@@ -480,10 +482,9 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     set({ warning: null });
 
     const droneId = bestDrone.id;
-    let currentDronePos = bestDrone.position;
-    if (bestDrone.status === "idle" || bestDrone.subStatus === "docked") {
-      currentDronePos = getBerthWorldPosition(bestDrone.berthId, simTime);
-    }
+    const currentDronePos = (bestDrone.status === "idle" || bestDrone.subStatus === "docked" || !bestDrone.flight)
+      ? getBerthWorldPosition(bestDrone.berthId, simTime)
+      : bestDrone.position;
     const droneSpeed = bestDrone.speed || 1.2;
 
     // Predictive Keplerian Rendezvous Solver:
@@ -532,6 +533,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                 startPosition: currentDronePos,
                 targetPosition: rendezvousPos,
                 startTime: Date.now(),
+                startSimTime: simTime,
                 duration: interceptDurationSec,
                 fuelCost: chosenFuelCost,
                 type: "intercept"
@@ -580,7 +582,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         setTimeout(() => {
           get().addLog(`${droneId} TOWING ${target.id} // INBOUND DESCENT TO ORBITING DEPOT-01 ISRU REFINERY`, "action");
 
-          const returnStartSimTime = (Date.now() - get().missionStartedAt) / 1000;
+          const returnStartSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
           const realTimeCapturePos = getDebrisOrbitalPosition(target, returnStartSimTime);
 
           // Predictive Keplerian Rendezvous Solver with the moving orbiting station
@@ -609,6 +611,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                       startPosition: realTimeCapturePos,
                       targetPosition: returnTargetPos,
                       startTime: Date.now(),
+                      startSimTime: returnStartSimTime,
                       duration: liveReturnDurationSec,
                       fuelCost: chosenFuelCost,
                       type: "return"
@@ -625,7 +628,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
               "action"
             );
 
-            const arriveSimTime = (Date.now() - get().missionStartedAt) / 1000;
+            const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
             const liveSmeltingStandOff = getSmeltingStandOffPosition(arriveSimTime);
 
             set((current) => ({
@@ -666,7 +669,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                 "action"
               );
 
-              const smeltSimTime = (Date.now() - get().missionStartedAt) / 1000;
+              const smeltSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
               const liveIntakePos = getSmeltingIntakePosition(smeltSimTime);
               const liveStandOffPos = getSmeltingStandOffPosition(smeltSimTime);
 
@@ -755,7 +758,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     }
 
     // Execute Kuhn-Munkres (Hungarian) Bipartite Matching Algorithm with live orbital station position
-    const simTime = (Date.now() - state.missionStartedAt) / 1000;
+    const simTime = getGlobalSimTime() || ((Date.now() - state.missionStartedAt) / 1000);
     const currentDepotPos = getStationOrbitalPosition(simTime, state.depot);
     const optimalMatches = solveHungarianMatching(
       state.drones,

@@ -13,6 +13,7 @@ import {
 } from "@/lib/store";
 import {
   DroneBerthId,
+  calculateBlendedDroneFlightPosition,
   getBerthOutwardNormal,
   getBerthWorldPosition,
   getDebrisOrbitalPosition,
@@ -29,6 +30,7 @@ import {
   getStationOrbitTrackSamples,
   getStationRingAngle,
   getStationTransform,
+  setGlobalSimTime,
   STATION_RING_ROTATION_SPEED
 } from "@/lib/orbital";
 
@@ -596,23 +598,12 @@ function DroneMesh({
 
     // 1. In Flight along Curved Orbital Transfer Arc
     if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
-      const elapsed = (Date.now() - drone.flight.startTime) / 1000;
+      const elapsed = drone.flight.startSimTime !== undefined
+        ? clock.elapsedTime - drone.flight.startSimTime
+        : (Date.now() - drone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
-      const eased = easeInOutQuad(progress);
 
-      let pos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
-
-      // Terminal homing guidance: as returning drone approaches orbital depot, blend seamlessly into moving standoff
-      if (drone.status === "returning") {
-        const liveStandOff = getSmeltingStandOffPosition(clock.elapsedTime);
-        const blend = progress * progress;
-        pos = [
-          pos[0] + (liveStandOff[0] - drone.flight.targetPosition[0]) * blend,
-          pos[1] + (liveStandOff[1] - drone.flight.targetPosition[1]) * blend,
-          pos[2] + (liveStandOff[2] - drone.flight.targetPosition[2]) * blend
-        ];
-      }
-
+      const pos = calculateBlendedDroneFlightPosition(drone, clock.elapsedTime, debrisList);
       groupRef.current.position.set(pos[0], pos[1], pos[2]);
 
       // Dynamic Flight Regimes:
@@ -630,23 +621,28 @@ function DroneMesh({
       }
 
       if (modelRef.current) {
-        const tangent = getOrbitalArcTangent(drone.flight.startPosition, drone.flight.targetPosition, eased);
+        // Forward tangent along live blended trajectory
+        const nextTime = clock.elapsedTime + 0.05;
+        const nextPos = calculateBlendedDroneFlightPosition(drone, nextTime, debrisList);
+        const heading = new THREE.Vector3(
+          nextPos[0] - pos[0],
+          nextPos[1] - pos[1],
+          nextPos[2] - pos[2]
+        );
+        if (heading.lengthSq() > 0.00001) {
+          heading.normalize();
+        } else {
+          heading.set(0, 0, 1);
+        }
+
+        modelRef.current.up.set(0, 1, 0);
+
         if (phase === "brake") {
           // Retrograde flip: orient thruster along flight vector to brake
-          const retroTarget = new THREE.Vector3(
-            pos[0] - tangent[0],
-            pos[1] - tangent[1],
-            pos[2] - tangent[2]
-          );
-          modelRef.current.lookAt(retroTarget);
+          modelRef.current.lookAt(pos[0] - heading.x, pos[1] - heading.y, pos[2] - heading.z);
         } else {
           // Prograde acceleration or coasting
-          const proTarget = new THREE.Vector3(
-            pos[0] + tangent[0],
-            pos[1] + tangent[1],
-            pos[2] + tangent[2]
-          );
-          modelRef.current.lookAt(proTarget);
+          modelRef.current.lookAt(pos[0] + heading.x, pos[1] + heading.y, pos[2] + heading.z);
         }
       }
 
@@ -673,14 +669,17 @@ function DroneMesh({
           const standOff = dVec.clone().addScaledVector(outward, 0.09);
           groupRef.current.position.set(standOff.x, standOff.y, standOff.z);
           if (modelRef.current) {
+            modelRef.current.up.set(0, 1, 0);
             modelRef.current.lookAt(dVec);
             // Spin-matching attitude micro-adjustments
             modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 9) * 0.06;
           }
         } else {
-          // Clamping: Latched in rigid contact with target
-          groupRef.current.position.set(dPos[0], dPos[1], dPos[2]);
+          // Clamping: Latched in rigid contact with target (smooth contact glide)
+          groupRef.current.position.lerp(dVec, 0.2);
           if (modelRef.current) {
+            modelRef.current.up.set(0, 1, 0);
+            modelRef.current.lookAt(new THREE.Vector3(0, 0, 0));
             modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.1);
             modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.1);
           }
@@ -706,6 +705,7 @@ function DroneMesh({
         const stationTrans = getStationTransform(clock.elapsedTime);
         const ringAngle = getStationRingAngle(clock.elapsedTime);
         const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
+        modelRef.current.up.set(...stationTrans.zenith);
         const lookTarget = new THREE.Vector3(
           berthPos[0] + normal[0],
           berthPos[1] + normal[1],
@@ -722,6 +722,7 @@ function DroneMesh({
         const stationTrans = getStationTransform(clock.elapsedTime);
         const ringAngle = getStationRingAngle(clock.elapsedTime);
         const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
+        modelRef.current.up.set(...stationTrans.zenith);
         const lookTarget = new THREE.Vector3(
           berthPos[0] + normal[0],
           berthPos[1] + normal[1],
@@ -1972,6 +1973,9 @@ function OrbitalScene() {
 
   // Frame-by-frame camera focus & dynamic follow tracking loop
   useFrame(({ clock }) => {
+    // Synchronize global simulation clock with Three.js renderer clock
+    setGlobalSimTime(clock.elapsedTime);
+
     const controls = controlsRef.current;
     if (!controls) return;
 
