@@ -2,7 +2,7 @@
 
 import { Line, OrbitControls, Stars, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
@@ -17,68 +17,265 @@ function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
-// Glowing Ring & Station for Recovery Depot "DEPOT-01"
-function RecoveryDepotRing({ depot }: { depot: RecoveryDepot }) {
-  const outerRingRef = useRef<THREE.Group>(null);
-  const innerRingRef = useRef<THREE.Mesh>(null);
-  const coreRef = useRef<THREE.Mesh>(null);
+// Multi-Bay Orbital Recovery Hub "DEPOT-01"
+function OrbitalRecoveryStation({
+  depot,
+  drones
+}: {
+  depot: RecoveryDepot;
+  drones: Drone[];
+}) {
+  const stationGroupRef = useRef<THREE.Group>(null);
+  const ringRef = useRef<THREE.Group>(null);
+  const radarRef = useRef<THREE.Group>(null);
+  const intakePulseRef = useRef<THREE.Mesh>(null);
+  const [hovered, setHovered] = useState(false);
+
+  const addLog = useMissionStore((state) => state.addLog);
+  const totalRecoveredMass = useMissionStore((state) => state.totalRecoveredMass);
+  const totalRecoveredValue = useMissionStore((state) => state.totalRecoveredValue);
+
+  // Check if any drone is currently returning or approaching depot
+  const activeIncoming = useMemo(() => {
+    return drones.some((d) => d.status === "returning");
+  }, [drones]);
 
   useFrame((_, delta) => {
-    if (outerRingRef.current) {
-      outerRingRef.current.rotation.z += delta * 0.45;
-      outerRingRef.current.rotation.x += delta * 0.2;
+    // Smooth continuous centrifugal spin of habitat ring
+    if (ringRef.current) {
+      ringRef.current.rotation.y += delta * 0.35;
     }
-    if (innerRingRef.current) {
-      innerRingRef.current.rotation.z -= delta * 0.6;
+    // High-frequency telemetry sweep of radar dish
+    if (radarRef.current) {
+      radarRef.current.rotation.y += delta * 1.2;
     }
-    if (coreRef.current) {
-      coreRef.current.rotation.y += delta * 0.5;
+    // Pulsing intake glow
+    if (intakePulseRef.current) {
+      const pulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.35;
+      (intakePulseRef.current.material as THREE.MeshBasicMaterial).opacity = pulse;
     }
   });
 
+  const handleStationClick = (e: any) => {
+    e.stopPropagation();
+    const valString = (totalRecoveredValue / 1_000_000).toFixed(2);
+    addLog(
+      `DEPOT-01 STATUS // ORBITAL RECOVERY HUB // STORED MASS: ${totalRecoveredMass} kg // SALVAGE VALUE: $${valString}M // 4 BERTHS ONLINE`,
+      "info"
+    );
+  };
+
   return (
-    <group position={depot.position}>
-      {/* Outer Rotating Glowing Ring */}
-      <group ref={outerRingRef}>
-        <mesh>
-          <torusGeometry args={[0.34, 0.032, 16, 64]} />
-          <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+    <group
+      ref={stationGroupRef}
+      position={depot.position}
+      onClick={handleStationClick}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHovered(true);
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        setHovered(false);
+        document.body.style.cursor = "default";
+      }}
+    >
+      {/* 1. Central Pressurized Command Hub */}
+      <mesh>
+        <cylinderGeometry args={[0.08, 0.09, 0.42, 16]} />
+        <meshStandardMaterial
+          color="#334155"
+          metalness={0.85}
+          roughness={0.25}
+        />
+      </mesh>
+
+      {/* Observation Ring & Visor Windows */}
+      <mesh position={[0, 0.06, 0]}>
+        <cylinderGeometry args={[0.088, 0.088, 0.05, 16]} />
+        <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+      </mesh>
+
+      {/* 2. Top Communications Tower & Sweeping Radar Spire */}
+      <group position={[0, 0.21, 0]}>
+        <mesh position={[0, 0.08, 0]}>
+          <cylinderGeometry args={[0.012, 0.018, 0.16, 8]} />
+          <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
         </mesh>
-        {/* Glow halo */}
-        <mesh scale={1.12}>
-          <torusGeometry args={[0.34, 0.015, 8, 32]} />
+        {/* Sweeping High-Gain Radar Dish */}
+        <group ref={radarRef} position={[0, 0.17, 0]}>
+          <mesh rotation={[0.4, 0, 0]}>
+            <coneGeometry args={[0.055, 0.025, 16, 1, true]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.9} roughness={0.15} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh position={[0, 0.02, 0]}>
+            <cylinderGeometry args={[0.004, 0.004, 0.04, 6]} />
+            <meshBasicMaterial color="#00FFCC" toneMapped={false} />
+          </mesh>
+        </group>
+        {/* Beacon light */}
+        <pointLight color="#00FFCC" intensity={1.8} distance={2.5} />
+      </group>
+
+      {/* 3. Counter-Rotating Toroidal Habitat Ring */}
+      <group ref={ringRef}>
+        {/* Outer Torus */}
+        <mesh>
+          <torusGeometry args={[0.36, 0.024, 16, 64]} />
+          <meshStandardMaterial
+            color="#475569"
+            metalness={0.8}
+            roughness={0.3}
+          />
+        </mesh>
+        {/* Habitation Ring Edge Neon Strips */}
+        <mesh scale={1.03}>
+          <torusGeometry args={[0.36, 0.008, 8, 32]} />
           <meshBasicMaterial
-            color="#00FF66"
+            color="#00FFFF"
             transparent
-            opacity={0.55}
+            opacity={0.65}
             toneMapped={false}
           />
         </mesh>
-        {/* Docking crossbars */}
-        <mesh rotation={[0, 0, Math.PI / 4]}>
-          <boxGeometry args={[0.68, 0.015, 0.015]} />
-          <meshBasicMaterial color="#00FFFF" transparent opacity={0.8} />
+        {/* 4 Structural Spoke Trusses */}
+        <mesh rotation={[0, 0, 0]}>
+          <boxGeometry args={[0.72, 0.014, 0.018]} />
+          <meshStandardMaterial color="#64748b" metalness={0.85} roughness={0.25} />
         </mesh>
-        <mesh rotation={[0, 0, -Math.PI / 4]}>
-          <boxGeometry args={[0.68, 0.015, 0.015]} />
-          <meshBasicMaterial color="#00FFFF" transparent opacity={0.8} />
+        <mesh rotation={[0, Math.PI / 2, 0]}>
+          <boxGeometry args={[0.72, 0.014, 0.018]} />
+          <meshStandardMaterial color="#64748b" metalness={0.85} roughness={0.25} />
         </mesh>
       </group>
 
-      {/* Counter-rotating Inner Energy Ring */}
-      <mesh ref={innerRingRef}>
-        <torusGeometry args={[0.22, 0.016, 8, 32]} />
-        <meshBasicMaterial color="#00E676" transparent opacity={0.7} toneMapped={false} />
-      </mesh>
+      {/* 4. Articulating Solar Array Wings */}
+      <group position={[0, 0.02, 0]}>
+        {/* Port Solar Wing */}
+        <group position={[-0.58, 0, 0]}>
+          <mesh>
+            <boxGeometry args={[0.36, 0.008, 0.14]} />
+            <meshStandardMaterial
+              color="#1e3a8a"
+              metalness={0.9}
+              roughness={0.15}
+            />
+          </mesh>
+          <mesh position={[0.19, 0, 0]}>
+            <cylinderGeometry args={[0.01, 0.01, 0.04, 8]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
+          </mesh>
+        </group>
+        {/* Starboard Solar Wing */}
+        <group position={[0.58, 0, 0]}>
+          <mesh>
+            <boxGeometry args={[0.36, 0.008, 0.14]} />
+            <meshStandardMaterial
+              color="#1e3a8a"
+              metalness={0.9}
+              roughness={0.15}
+            />
+          </mesh>
+          <mesh position={[-0.19, 0, 0]}>
+            <cylinderGeometry args={[0.01, 0.01, 0.04, 8]} />
+            <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
+          </mesh>
+        </group>
+      </group>
 
-      {/* Central Station Core */}
-      <mesh ref={coreRef}>
-        <octahedronGeometry args={[0.11, 0]} />
-        <meshBasicMaterial color="#E0FFFF" toneMapped={false} />
-      </mesh>
+      {/* 5. Four Cantilever Drone Mooring Berths (N, S, E, W) */}
+      {[
+        { id: "B1", pos: [0.46, -0.04, 0], rot: [0, 0, 0] },
+        { id: "B2", pos: [-0.46, -0.04, 0], rot: [0, Math.PI, 0] },
+        { id: "B3", pos: [0, -0.04, 0.46], rot: [0, -Math.PI / 2, 0] },
+        { id: "B4", pos: [0, -0.04, -0.46], rot: [0, Math.PI / 2, 0] }
+      ].map((berth) => (
+        <group key={berth.id} position={berth.pos as [number, number, number]} rotation={berth.rot as [number, number, number]}>
+          {/* Berth Cantilever Arm */}
+          <mesh position={[-0.04, 0, 0]}>
+            <boxGeometry args={[0.1, 0.016, 0.024]} />
+            <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.3} />
+          </mesh>
+          {/* Magnetic Mooring Cradle */}
+          <mesh position={[0.02, 0, 0]}>
+            <cylinderGeometry args={[0.045, 0.05, 0.018, 12]} />
+            <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
+          </mesh>
+          {/* Docking Target Ring */}
+          <mesh position={[0.02, 0.011, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.025, 0.038, 16]} />
+            <meshBasicMaterial
+              color={activeIncoming ? "#FFBF00" : "#00FF66"}
+              transparent
+              opacity={0.85}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Approach Guide Micro-Lights */}
+          <mesh position={[0.02, 0.015, 0.035]}>
+            <sphereGeometry args={[0.005, 8, 8]} />
+            <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
+          </mesh>
+          <mesh position={[0.02, 0.015, -0.035]}>
+            <sphereGeometry args={[0.005, 8, 8]} />
+            <meshBasicMaterial color={activeIncoming ? "#FFBF00" : "#00FFCC"} />
+          </mesh>
+        </group>
+      ))}
 
-      {/* Depot Beacon Light */}
-      <pointLight color="#00FFFF" intensity={2} distance={3} />
+      {/* 6. Underside Salvage De-Orbit & Smelting Intake Chute */}
+      <group position={[0, -0.22, 0]}>
+        {/* Inverted Conical Smelting Funnel */}
+        <mesh rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[0.16, 0.12, 16, 1, true]} />
+          <meshStandardMaterial
+            color="#334155"
+            metalness={0.85}
+            roughness={0.25}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Electromagnetic Containment Ring */}
+        <mesh position={[0, -0.07, 0]}>
+          <torusGeometry args={[0.165, 0.014, 8, 32]} />
+          <meshBasicMaterial color="#00FFFF" toneMapped={false} />
+        </mesh>
+        {/* Pulsing Processing Field Beam */}
+        <mesh ref={intakePulseRef} position={[0, -0.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.155, 24]} />
+          <meshBasicMaterial
+            color={activeIncoming ? "#00FF66" : "#00FFFF"}
+            transparent
+            opacity={0.7}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Core Processing Light */}
+        <pointLight
+          color={activeIncoming ? "#00FF66" : "#00FFFF"}
+          intensity={2.2}
+          distance={1.8}
+        />
+      </group>
+
+      {/* 7. Hover Shield Bubble */}
+      {hovered && (
+        <mesh>
+          <sphereGeometry args={[0.62, 24, 24]} />
+          <meshBasicMaterial
+            color="#00FFFF"
+            transparent
+            opacity={0.12}
+            wireframe
+          />
+        </mesh>
+      )}
+
+      {/* 8. Invisible Raycasting Click Hitbox */}
+      <mesh>
+        <sphereGeometry args={[0.58, 16, 16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
     </group>
   );
 }
@@ -745,8 +942,8 @@ function OrbitalScene() {
       {/* Earth Centerpiece */}
       <Earth />
 
-      {/* Recovery Depot Glowing Ring & Station */}
-      <RecoveryDepotRing depot={depot} />
+      {/* Recovery Depot Multi-Bay Orbital Hub */}
+      <OrbitalRecoveryStation depot={depot} drones={drones} />
 
       {/* Debris Swarm */}
       {debris.map((item) => (
