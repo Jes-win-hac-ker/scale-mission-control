@@ -1,6 +1,6 @@
 "use client";
 
-import { Line, OrbitControls, Stars, useGLTF } from "@react-three/drei";
+import { Line, OrbitControls, Stars, useGLTF, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -1314,35 +1314,205 @@ function DebrisMesh({
   );
 }
 
-// Earth Visualization
+// Earth Visualization - Photorealistic Blue Marble with Atmosphere & City Lights
 function Earth() {
-  const earthRef = useRef<THREE.Group>(null);
-  const earthTexture = useMemo(() => new THREE.TextureLoader().load("/earth-map.svg"), []);
+  const earthRef = useRef<THREE.Mesh>(null);
+  const cloudsRef = useRef<THREE.Mesh>(null);
+
+  const [dayMap, nightMap, cloudsMap, specularMap] = useTexture([
+    "/textures/earth/earth_day.jpg",
+    "/textures/earth/earth_lights.png",
+    "/textures/earth/earth_clouds.png",
+    "/textures/earth/earth_specular.jpg"
+  ]);
+
   useFrame((_, delta) => {
-    if (earthRef.current) earthRef.current.rotation.y += delta * 0.06;
+    if (earthRef.current) earthRef.current.rotation.y += delta * 0.025;
+    if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.038;
   });
 
+  const surfaceShader = useMemo(() => ({
+    uniforms: {
+      uDayMap: { value: dayMap },
+      uNightMap: { value: nightMap },
+      uSpecularMap: { value: specularMap },
+      uSunDirection: { value: new THREE.Vector3(8, 10, 6).normalize() }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vUv = uv;
+        vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uDayMap;
+      uniform sampler2D uNightMap;
+      uniform sampler2D uSpecularMap;
+      uniform vec3 uSunDirection;
+
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec3 normal = normalize(vNormal);
+        vec3 sunDir = normalize(uSunDirection);
+        float sunDot = dot(normal, sunDir);
+
+        vec4 dayColor = texture2D(uDayMap, vUv);
+        vec4 nightColor = texture2D(uNightMap, vUv);
+        float specMask = texture2D(uSpecularMap, vUv).r;
+
+        // Smooth day-to-night terminator transition
+        float dayFactor = smoothstep(-0.15, 0.2, sunDot);
+
+        // Specular ocean sun reflection
+        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+        vec3 reflectDir = reflect(-sunDir, normal);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 28.0);
+        vec3 specularGlint = vec3(1.0, 0.98, 0.95) * spec * specMask * 1.5 * max(0.0, sunDot);
+
+        // Atmospheric twilight amber glow along terminator
+        float twilight = smoothstep(-0.25, 0.0, sunDot) * smoothstep(0.25, 0.0, sunDot);
+        vec3 twilightTint = vec3(0.92, 0.38, 0.12) * twilight * 0.4;
+
+        // Golden city night lights
+        vec3 nightLights = nightColor.rgb * vec3(1.35, 1.1, 0.75) * (1.0 - dayFactor) * 1.8;
+
+        // Final composite surface
+        vec3 surfaceColor = mix(nightLights, dayColor.rgb + specularGlint, dayFactor) + twilightTint;
+
+        gl_FragColor = vec4(surfaceColor, 1.0);
+      }
+    `
+  }), [dayMap, nightMap, specularMap]);
+
+  const cloudsShader = useMemo(() => ({
+    uniforms: {
+      uCloudsMap: { value: cloudsMap },
+      uSunDirection: { value: new THREE.Vector3(8, 10, 6).normalize() }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vNormal;
+
+      void main() {
+        vUv = uv;
+        vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uCloudsMap;
+      uniform vec3 uSunDirection;
+
+      varying vec2 vUv;
+      varying vec3 vNormal;
+
+      void main() {
+        vec3 normal = normalize(vNormal);
+        vec3 sunDir = normalize(uSunDirection);
+        float sunDot = dot(normal, sunDir);
+
+        vec4 cloudTex = texture2D(uCloudsMap, vUv);
+        float dayFactor = smoothstep(-0.15, 0.25, sunDot);
+
+        // Day vs night cloud illumination
+        vec3 cloudColor = mix(vec3(0.03, 0.05, 0.08), vec3(0.98, 0.99, 1.0), dayFactor);
+        float alpha = cloudTex.r * 0.65;
+
+        gl_FragColor = vec4(cloudColor, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false
+  }), [cloudsMap]);
+
+  const atmosphereShader = useMemo(() => ({
+    uniforms: {
+      uSunDirection: { value: new THREE.Vector3(8, 10, 6).normalize() }
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uSunDirection;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vec3 normal = normalize(vNormal);
+        vec3 viewDir = normalize(cameraPosition - vPosition);
+        vec3 sunDir = normalize(uSunDirection);
+
+        // Fresnel: limb grazing edge intensity
+        float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+        float fresnel = pow(rim, 3.2);
+
+        float sunDot = dot(normal, sunDir);
+        float sunFactor = smoothstep(-0.25, 0.45, sunDot);
+
+        // Electric cyan Rayleigh scattering on sunlit limb, deep navy on dark limb
+        vec3 atmoDay = vec3(0.12, 0.72, 1.0);
+        vec3 atmoNight = vec3(0.02, 0.06, 0.18);
+        vec3 atmoColor = mix(atmoNight, atmoDay, sunFactor);
+
+        float alpha = fresnel * (sunFactor * 0.9 + 0.1) * 1.4;
+
+        gl_FragColor = vec4(atmoColor, alpha);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.BackSide,
+    depthWrite: false
+  }), []);
+
   return (
-    <group ref={earthRef}>
+    <group>
+      {/* Planetary Crust with Day/Night Shader & City Lights */}
+      <mesh ref={earthRef}>
+        <sphereGeometry args={[1.35, 64, 64]} />
+        <shaderMaterial attach="material" {...surfaceShader} />
+      </mesh>
+
+      {/* Atmospheric Cloud Canopy with Independent Drift */}
+      <mesh ref={cloudsRef}>
+        <sphereGeometry args={[1.365, 64, 64]} />
+        <shaderMaterial attach="material" {...cloudsShader} />
+      </mesh>
+
+      {/* Rayleigh Atmospheric Scattering Outer Halo */}
       <mesh>
-        <icosahedronGeometry args={[1.35, 2]} />
-        <meshBasicMaterial color="#76e6e9" wireframe transparent opacity={0.22} />
+        <sphereGeometry args={[1.44, 48, 48]} />
+        <shaderMaterial attach="material" {...atmosphereShader} />
       </mesh>
-      <mesh scale={0.96}>
-        <sphereGeometry args={[1.35, 32, 32]} />
-        <meshBasicMaterial map={earthTexture} color="#d3ffff" transparent opacity={0.98} />
+
+      {/* Precision Equatorial Reference Ring */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[1.52, 0.003, 8, 96]} />
+        <meshBasicMaterial color="#00ffff" transparent opacity={0.18} />
       </mesh>
-      <mesh scale={0.985}>
-        <sphereGeometry args={[1.35, 32, 32]} />
-        <meshBasicMaterial color="#d7ffff" transparent opacity={0.1} wireframe />
-      </mesh>
-      <mesh rotation={[Math.PI / 2.15, 0.4, 0]}>
-        <torusGeometry args={[1.62, 0.008, 8, 96]} />
-        <meshBasicMaterial color="#00ffff" transparent opacity={0.35} />
-      </mesh>
-      <mesh rotation={[0.5, 0.4, Math.PI / 2]}>
-        <torusGeometry args={[1.9, 0.006, 8, 96]} />
-        <meshBasicMaterial color="#ffbf00" transparent opacity={0.22} />
+
+      {/* ISS / S.C.A.L.E. 51.6° Orbital Inclination Corridor */}
+      <mesh rotation={[0.9, 0, 0]}>
+        <torusGeometry args={[1.68, 0.002, 8, 96]} />
+        <meshBasicMaterial color="#ffbf00" transparent opacity={0.14} />
       </mesh>
     </group>
   );
@@ -1657,3 +1827,7 @@ export default function Scene() {
 
 useGLTF.preload("/scale-extraction-drone.glb");
 useGLTF.preload("/scale-extraction-drone-debry.glb");
+useTexture.preload("/textures/earth/earth_day.jpg");
+useTexture.preload("/textures/earth/earth_lights.png");
+useTexture.preload("/textures/earth/earth_clouds.png");
+useTexture.preload("/textures/earth/earth_specular.jpg");
