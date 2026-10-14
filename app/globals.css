@@ -194,17 +194,91 @@ button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 4px; }
 }
 .warning-close:hover { color: #fff; }
 
-/* Target Focus Card */
+/* Target Focus Card - Anchored to Bottom-Left to Unblock Orbital View */
 .target-focus {
-  align-self: center;
+  align-self: flex-start;
+  margin-top: auto;
+  margin-left: 0;
   width: min(390px, 100%);
-  padding: 16px;
+  padding: 14px 16px;
   border: 1px solid rgba(255,191,0,.45);
-  background: rgba(5,5,5,.82);
-  backdrop-filter: blur(12px);
+  background: rgba(5,5,5,.85);
+  backdrop-filter: blur(14px);
   pointer-events: auto;
-  box-shadow: 0 20px 55px rgba(0,0,0,.45);
+  box-shadow: 0 16px 45px rgba(0,0,0,.5);
+  transition: all 0.25s ease;
 }
+
+.focus-toggle-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font: 700 13px/1 "JetBrains Mono", monospace;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.focus-toggle-btn:hover {
+  background: rgba(0, 255, 255, 0.25);
+  border-color: var(--cyan);
+  color: #fff;
+}
+
+.minimized-pill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.minimized-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.minimized-title strong {
+  font: 600 17px "JetBrains Mono", monospace;
+  color: #fff;
+}
+.minimized-metrics, .minimized-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.minimized-fetch-btn {
+  padding: 5px 12px;
+  background: var(--amber);
+  color: var(--void);
+  font: 700 10px "JetBrains Mono", monospace;
+  letter-spacing: .04em;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.minimized-fetch-btn:hover {
+  box-shadow: 0 0 14px rgba(255, 191, 0, 0.6);
+  transform: translateY(-1px);
+}
+.minimized-expand-btn {
+  padding: 5px 10px;
+  background: rgba(0, 255, 255, 0.1);
+  color: var(--cyan);
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  font: 600 9px "JetBrains Mono", monospace;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.minimized-expand-btn:hover {
+  background: var(--cyan);
+  color: var(--void);
+}
+
 .focus-header { display: flex; justify-content: space-between; align-items: center; }
 .focus-title { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 12px; }
 .focus-title h2 { margin: 0; color: #fff; font: 600 34px/1 "JetBrains Mono", monospace; letter-spacing: -.06em; }
