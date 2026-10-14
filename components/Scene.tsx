@@ -11,6 +11,13 @@ import {
   RecoveryDepot,
   useMissionStore
 } from "@/lib/store";
+import {
+  getDebrisOrbitalPosition,
+  getDebrisOrbitTrackSamples,
+  getOrbitalArcPoint,
+  getOrbitalArcSamples,
+  getOrbitalArcTangent
+} from "@/lib/orbital";
 
 // Smooth quadratic easing for fluid time-based movement
 function easeInOutQuad(t: number): number {
@@ -360,22 +367,24 @@ function DroneMesh({
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
 
-    // Time-based movement with easing function
+    // Time-based movement with easing along curved orbital transfer arc
     if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
       const elapsed = (Date.now() - drone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
 
-      const targetX = THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased);
-      const targetY = THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased);
-      const targetZ = THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased);
+      const pos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
+      groupRef.current.position.set(pos[0], pos[1], pos[2]);
 
-      groupRef.current.position.set(targetX, targetY, targetZ);
-
-      // Dynamically orient drone toward flight target vector
+      // Dynamically orient drone toward curved flight path tangent vector
       if (modelRef.current) {
-        const flightTarget = new THREE.Vector3(...drone.flight.targetPosition);
-        modelRef.current.lookAt(flightTarget);
+        const tangent = getOrbitalArcTangent(drone.flight.startPosition, drone.flight.targetPosition, eased);
+        const lookTarget = new THREE.Vector3(
+          pos[0] + tangent[0],
+          pos[1] + tangent[1],
+          pos[2] + tangent[2]
+        );
+        modelRef.current.lookAt(lookTarget);
       }
     } else {
       groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
@@ -728,7 +737,7 @@ function DebrisMesh({
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
 
-    // When captured and drone is returning, debris position follows drone
+    // When captured and drone is returning, debris position follows drone along curved orbital arc
     if (
       debris.status === "captured" &&
       assignedDrone?.flight &&
@@ -738,25 +747,18 @@ function DebrisMesh({
       const progress = Math.min(1, Math.max(0, elapsed / assignedDrone.flight.duration));
       const eased = easeInOutQuad(progress);
 
-      groupRef.current.position.set(
-        THREE.MathUtils.lerp(
-          assignedDrone.flight.startPosition[0],
-          assignedDrone.flight.targetPosition[0],
-          eased
-        ),
-        THREE.MathUtils.lerp(
-          assignedDrone.flight.startPosition[1],
-          assignedDrone.flight.targetPosition[1],
-          eased
-        ),
-        THREE.MathUtils.lerp(
-          assignedDrone.flight.startPosition[2],
-          assignedDrone.flight.targetPosition[2],
-          eased
-        )
+      const pos = getOrbitalArcPoint(
+        assignedDrone.flight.startPosition,
+        assignedDrone.flight.targetPosition,
+        eased
       );
-    } else {
+      groupRef.current.position.set(pos[0], pos[1], pos[2]);
+    } else if (debris.status === "recovered") {
       groupRef.current.position.set(debris.position[0], debris.position[1], debris.position[2]);
+    } else {
+      // Continuous Keplerian orbital motion around Earth
+      const pos = getDebrisOrbitalPosition(debris, Date.now() / 1000);
+      groupRef.current.position.set(pos[0], pos[1], pos[2]);
     }
 
     // Natural multi-axis tumbling rotation
@@ -883,24 +885,58 @@ function Earth() {
   );
 }
 
-// Active Trajectory Vectors
+// Dynamic Curved Trajectory Arc
 function ActiveTrajectory({
-  points,
+  start,
+  target,
   color
 }: {
-  points: [[number, number, number], [number, number, number]];
+  start: [number, number, number];
+  target: [number, number, number];
   color: string;
 }) {
+  const points = useMemo(() => {
+    return getOrbitalArcSamples(start, target, 40);
+  }, [start, target]);
+
   return (
     <Line
       points={points}
       color={color}
-      lineWidth={1.4}
+      lineWidth={1.6}
       dashed
       dashSize={0.08}
-      gapSize={0.05}
+      gapSize={0.04}
       transparent
-      opacity={0.85}
+      opacity={0.88}
+    />
+  );
+}
+
+// Faint Orbit Trace Ring for Satellites & Space Debris
+function DebrisOrbitRing({
+  debris,
+  selected
+}: {
+  debris: Debris;
+  selected: boolean;
+}) {
+  const points = useMemo(() => {
+    return getDebrisOrbitTrackSamples(debris, 64);
+  }, [debris]);
+
+  if (debris.status === "recovered") return null;
+
+  return (
+    <Line
+      points={points}
+      color={selected ? "#FFBF00" : "#38bdf8"}
+      lineWidth={selected ? 1.4 : 0.6}
+      dashed
+      dashSize={selected ? 0.08 : 0.04}
+      gapSize={selected ? 0.04 : 0.08}
+      transparent
+      opacity={selected ? 0.65 : 0.16}
     />
   );
 }
@@ -935,17 +971,13 @@ function OrbitalScene() {
     return () => window.removeEventListener("scale:zoom", handleZoom);
   }, []);
 
-  // Real-time flight position calculator for drones
+  // Real-time flight position calculator for drones along curved transfer arcs
   const getDroneRealtimePos = (drone: Drone): [number, number, number] => {
     if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
       const elapsed = (Date.now() - drone.flight.startTime) / 1000;
       const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
       const eased = easeInOutQuad(progress);
-      return [
-        THREE.MathUtils.lerp(drone.flight.startPosition[0], drone.flight.targetPosition[0], eased),
-        THREE.MathUtils.lerp(drone.flight.startPosition[1], drone.flight.targetPosition[1], eased),
-        THREE.MathUtils.lerp(drone.flight.startPosition[2], drone.flight.targetPosition[2], eased)
-      ];
+      return getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
     }
     return drone.position;
   };
@@ -975,7 +1007,9 @@ function OrbitalScene() {
             targetVec.set(pos[0], pos[1], pos[2]);
             targetDistance = 0.65;
           } else {
-            targetVec.set(item.position[0], item.position[1], item.position[2]);
+            // Real-time Keplerian orbital position
+            const pos = getDebrisOrbitalPosition(item, Date.now() / 1000);
+            targetVec.set(pos[0], pos[1], pos[2]);
             targetDistance = 0.85;
           }
         }
@@ -1058,6 +1092,15 @@ function OrbitalScene() {
       {/* Recovery Depot Multi-Bay Orbital Hub */}
       <OrbitalRecoveryStation depot={depot} drones={drones} />
 
+      {/* Keplerian Orbit Track Rings for Satellites & Space Debris */}
+      {debris.map((item) => (
+        <DebrisOrbitRing
+          key={`orbit-${item.id}`}
+          debris={item}
+          selected={item.id === selectedDebrisId}
+        />
+      ))}
+
       {/* Debris Swarm */}
       {debris.map((item) => (
         <DebrisMesh
@@ -1078,15 +1121,16 @@ function OrbitalScene() {
         />
       ))}
 
-      {/* Dynamic Trajectories */}
+      {/* Dynamic Curved Trajectories */}
       {drones.map((drone) => {
         if (!drone.flight) return null;
         if (drone.status === "intercepting") {
           return (
             <ActiveTrajectory
               key={`traj-${drone.id}-intercept`}
-              points={[drone.flight.startPosition, drone.flight.targetPosition]}
-              color="#2979FF"
+              start={drone.flight.startPosition}
+              target={drone.flight.targetPosition}
+              color="#00BFFF"
             />
           );
         }
@@ -1094,7 +1138,8 @@ function OrbitalScene() {
           return (
             <ActiveTrajectory
               key={`traj-${drone.id}-return`}
-              points={[drone.flight.startPosition, drone.flight.targetPosition]}
+              start={drone.flight.startPosition}
+              target={drone.flight.targetPosition}
               color="#00FF66"
             />
           );

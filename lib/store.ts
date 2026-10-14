@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { getDebrisOrbitalPosition } from "./orbital";
 
 export type DebrisStatus = "available" | "targeted" | "captured" | "recovered";
 
@@ -343,9 +344,12 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     let lowestScore = Infinity;
     let chosenFuelCost = 0;
 
+    // Real-time orbital position of target satellite at moment of dispatch
+    const currentDebrisPos = getDebrisOrbitalPosition(target, Date.now() / 1000);
+
     for (const drone of idleDrones) {
-      const distDroneDebris = distance(drone.position, target.position);
-      const distDebrisDepot = distance(target.position, depot.position);
+      const distDroneDebris = distance(drone.position, currentDebrisPos);
+      const distDebrisDepot = distance(currentDebrisPos, depot.position);
       const estimatedFuelCost = distDroneDebris + distDebrisDepot;
 
       if (drone.fuel > estimatedFuelCost) {
@@ -371,7 +375,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
     const droneId = bestDrone.id;
     const currentDronePos = bestDrone.position;
-    const debrisPos = target.position;
+    const debrisPos = currentDebrisPos;
     const depotPos = depot.position;
     const droneSpeed = bestDrone.speed;
 
@@ -393,7 +397,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     set((current) => ({
       debris: current.debris.map((item) =>
         item.id === target.id
-          ? { ...item, status: "targeted", assignedDroneId: droneId }
+          ? { ...item, status: "targeted", position: debrisPos, assignedDroneId: droneId }
           : item
       ),
       drones: current.drones.map((d) =>
