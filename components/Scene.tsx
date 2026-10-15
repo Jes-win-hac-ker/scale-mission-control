@@ -1987,9 +1987,10 @@ function DebrisOrbitRing({
     return getDebrisOrbitTrackSamples(debris, 64);
   }, [debris]);
 
+  const matTheme = useMemo(() => getDebrisMaterialTheme(debris.material), [debris.material]);
+
   if (debris.status === "recovered") return null;
 
-  const matTheme = useMemo(() => getDebrisMaterialTheme(debris.material), [debris.material]);
   const color = isTargeted ? "#FFBF00" : selected ? "#00FFFF" : matTheme.orbitRingColor;
   const lineWidth = isTargeted ? 2.6 : selected ? 1.8 : 0.75;
   const opacity = isTargeted ? 0.9 : selected ? 0.75 : 0.22;
