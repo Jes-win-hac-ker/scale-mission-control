@@ -34,6 +34,10 @@ import {
   setGlobalSimTime,
   STATION_RING_ROTATION_SPEED
 } from "@/lib/orbital";
+import {
+  DebrisMaterialTheme,
+  getDebrisMaterialTheme
+} from "@/lib/materials";
 
 
 // Smooth quadratic easing for fluid time-based movement
@@ -943,11 +947,13 @@ function DroneMesh({
 // 3D GLB Model Instance for Spent Rocket Stage Debris
 function RocketStageModel({
   color,
+  materialTheme,
   wireframe = false,
   opacity = 1,
   scale = 1
 }: {
   color: string;
+  materialTheme?: DebrisMaterialTheme;
   wireframe?: boolean;
   opacity?: number;
   scale?: number;
@@ -963,15 +969,23 @@ function RocketStageModel({
     // Center rocket along Z (offset ~ -0.8775)
     clone.position.set(0, 0, -0.8775);
 
+    const baseCol = wireframe ? color : (materialTheme?.primaryColor || "#E2E8F0");
+    const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#93C5FD");
+    const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.22);
+    const metalness = materialTheme?.metalness ?? 0.85;
+    const roughness = materialTheme?.roughness ?? 0.25;
+
     clone.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.material = new THREE.MeshStandardMaterial({
-          color: wireframe ? color : "#94a3b8",
-          metalness: 0.85,
-          roughness: 0.28,
+          color: baseCol,
+          emissive: emissiveCol,
+          emissiveIntensity: emissiveInt,
+          metalness: metalness,
+          roughness: roughness,
           wireframe: !!wireframe,
           transparent: opacity < 1,
           opacity: opacity
@@ -982,7 +996,7 @@ function RocketStageModel({
     const wrapper = new THREE.Group();
     wrapper.add(clone);
     return wrapper;
-  }, [scene, color, wireframe, opacity]);
+  }, [scene, color, materialTheme, wireframe, opacity]);
 
   return <primitive object={cloned} scale={scale} />;
 }
@@ -990,11 +1004,13 @@ function RocketStageModel({
 // 3D GLB Model Instance for Chondrite Meteorite / Asteroid Debris
 function MeteoriteModel({
   color,
+  materialTheme,
   wireframe = false,
   opacity = 1,
   scale = 1
 }: {
   color: string;
+  materialTheme?: DebrisMaterialTheme;
   wireframe?: boolean;
   opacity?: number;
   scale?: number;
@@ -1010,46 +1026,39 @@ function MeteoriteModel({
     // Reset local position offset (z was 1.265 in GLB) to pivot exactly at (0, 0, 0)
     clone.position.set(0, 0, 0);
 
+    const baseCol = wireframe ? color : (materialTheme?.primaryColor || "#D97706");
+    const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#B45309");
+    const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.24);
+    const metalness = materialTheme?.metalness ?? 0.35;
+    const roughness = materialTheme?.roughness ?? 0.75;
+
     clone.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
-        if (mesh.material) {
-          if (Array.isArray(mesh.material)) {
-            mesh.material = mesh.material.map((m) => {
-              const cl = (m as THREE.Material).clone();
-              if (wireframe && "wireframe" in cl) {
-                (cl as THREE.MeshStandardMaterial).wireframe = true;
-                (cl as THREE.MeshStandardMaterial).color = new THREE.Color(color);
-              }
-              cl.transparent = opacity < 1;
-              cl.opacity = opacity;
-              return cl;
-            });
-          } else {
-            const cl = (mesh.material as THREE.Material).clone();
-            if (wireframe && "wireframe" in cl) {
-              (cl as THREE.MeshStandardMaterial).wireframe = true;
-              (cl as THREE.MeshStandardMaterial).color = new THREE.Color(color);
-            }
-            cl.transparent = opacity < 1;
-            cl.opacity = opacity;
-            mesh.material = cl;
-          }
-        }
+        mesh.material = new THREE.MeshStandardMaterial({
+          color: baseCol,
+          emissive: emissiveCol,
+          emissiveIntensity: emissiveInt,
+          metalness: metalness,
+          roughness: roughness,
+          wireframe: !!wireframe,
+          transparent: opacity < 1,
+          opacity: opacity
+        });
       }
     });
 
     const wrapper = new THREE.Group();
     wrapper.add(clone);
     return wrapper;
-  }, [scene, color, wireframe, opacity]);
+  }, [scene, color, materialTheme, wireframe, opacity]);
 
   return <primitive object={cloned} scale={scale} />;
 }
 
-// Debris Geometries: Realistic 3D Rocket Parts, Meteorites, and Solar Arrays
+// Debris Geometries: Realistic 3D Rocket Parts, Meteorites, Solar Arrays, and Shielding
 function DebrisShape({
   material,
   color,
@@ -1064,28 +1073,39 @@ function DebrisShape({
   scale?: number;
 }) {
   const mat = (material || "").toLowerCase();
+  const theme = getDebrisMaterialTheme(material);
 
-  // 1. Defunct Satellite / Solar Array
+  // 1. Defunct Satellite / Solar Array / Battery
   if (mat.includes("solar") || mat.includes("battery")) {
+    const isBattery = mat.includes("battery");
+    const bodyColor = wireframe ? color : isBattery ? theme.primaryColor : theme.primaryColor;
+    const panelColor = wireframe ? color : isBattery ? theme.accentColor : theme.accentColor;
+    const emissiveCol = wireframe ? color : theme.emissiveColor;
+    const emissiveInt = wireframe ? 0.6 : theme.emissiveIntensity;
+
     return (
       <group scale={scale}>
-        {/* Central Satellite Body */}
+        {/* Central Satellite / Battery Body */}
         <mesh>
           <boxGeometry args={[0.7, 0.7, 0.7]} />
           <meshStandardMaterial
-            color={wireframe ? color : "#334155"}
-            metalness={0.75}
-            roughness={0.25}
+            color={bodyColor}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
+            metalness={theme.metalness}
+            roughness={theme.roughness}
             wireframe={wireframe}
             transparent={opacity < 1}
             opacity={opacity}
           />
         </mesh>
-        {/* Left Solar Panel */}
+        {/* Left Solar Panel / Battery Cell Flank */}
         <mesh position={[-1.15, 0, 0]}>
           <boxGeometry args={[1.3, 0.55, 0.05]} />
           <meshStandardMaterial
-            color={wireframe ? color : "#1e3a8a"}
+            color={panelColor}
+            emissive={panelColor}
+            emissiveIntensity={emissiveInt * 0.7}
             metalness={0.85}
             roughness={0.2}
             wireframe={wireframe}
@@ -1093,11 +1113,13 @@ function DebrisShape({
             opacity={opacity}
           />
         </mesh>
-        {/* Right Solar Panel */}
+        {/* Right Solar Panel / Battery Cell Flank */}
         <mesh position={[1.15, 0, 0]}>
           <boxGeometry args={[1.3, 0.55, 0.05]} />
           <meshStandardMaterial
-            color={wireframe ? color : "#1e3a8a"}
+            color={panelColor}
+            emissive={panelColor}
+            emissiveIntensity={emissiveInt * 0.7}
             metalness={0.85}
             roughness={0.2}
             wireframe={wireframe}
@@ -1109,7 +1131,9 @@ function DebrisShape({
         <mesh position={[0, 0.55, 0]}>
           <cylinderGeometry args={[0.03, 0.03, 0.45, 6]} />
           <meshStandardMaterial
-            color={wireframe ? color : "#cbd5e1"}
+            color={wireframe ? color : "#f8fafc"}
+            emissive={wireframe ? color : "#94a3b8"}
+            emissiveIntensity={0.2}
             metalness={0.9}
             roughness={0.1}
             transparent={opacity < 1}
@@ -1120,7 +1144,45 @@ function DebrisShape({
     );
   }
 
-  // 2. Spent Rocket Stage / Booster / Reaction Wheel / Fairing -> 3D Rocket GLB Model
+  // 2. Titanium Shielding Shard (Aerospace Whipple Plate)
+  if (mat.includes("shield") || mat.includes("titanium")) {
+    const plateColor = wireframe ? color : theme.primaryColor;
+    const ribColor = wireframe ? color : theme.accentColor;
+    return (
+      <group scale={scale}>
+        {/* Main Curved Whipple Shield Plate */}
+        <mesh rotation={[0.3, 0.4, 0.2]}>
+          <boxGeometry args={[1.4, 0.9, 0.08]} />
+          <meshStandardMaterial
+            color={plateColor}
+            emissive={theme.emissiveColor}
+            emissiveIntensity={theme.emissiveIntensity}
+            metalness={theme.metalness}
+            roughness={theme.roughness}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* Structural Stiffener Rib */}
+        <mesh position={[0, 0, 0.06]} rotation={[0.3, 0.4, 0.2]}>
+          <boxGeometry args={[1.2, 0.12, 0.06]} />
+          <meshStandardMaterial
+            color={ribColor}
+            emissive={theme.emissiveColor}
+            emissiveIntensity={theme.emissiveIntensity * 1.2}
+            metalness={0.9}
+            roughness={0.2}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 3. Spent Rocket Stage / Booster / Reaction Wheel / Fairing -> 3D Rocket GLB Model
   if (
     mat.includes("wheel") ||
     mat.includes("fairing") ||
@@ -1131,15 +1193,15 @@ function DebrisShape({
   ) {
     return (
       <group scale={scale * 2.2}>
-        <RocketStageModel color={color} wireframe={wireframe} opacity={opacity} />
+        <RocketStageModel color={color} materialTheme={theme} wireframe={wireframe} opacity={opacity} />
       </group>
     );
   }
 
-  // 3. Meteorite / Asteroid / Cosmic Shard / Shielding / Strut -> 3D Meteorite GLB Model
+  // 4. Meteorite / Asteroid / Chondrite / Ferrous Shard -> 3D Meteorite GLB Model
   return (
     <group scale={scale * 2.2}>
-      <MeteoriteModel color={color} wireframe={wireframe} opacity={opacity} />
+      <MeteoriteModel color={color} materialTheme={theme} wireframe={wireframe} opacity={opacity} />
     </group>
   );
 }
@@ -1381,27 +1443,28 @@ function DebrisMesh({
   const visualRef = useRef<THREE.Group>(null);
 
   const depot = useMissionStore((state) => state.depot);
+  const matTheme = useMemo(() => getDebrisMaterialTheme(debris.material), [debris.material]);
 
-  // Status-based color mapping per prompt requirements:
+  // Status-based color mapping:
   // - Targeted debris: amber
   // - Captured debris: green
-  // - Available debris: red
+  // - Available debris: material-specific signature color
   const color = useMemo(() => {
     if (debris.subStatus === "ingesting") {
       return "#FFAA00";
     }
     switch (debris.status) {
       case "available":
-        return "#FF0033"; // red
+        return matTheme.primaryColor;
       case "targeted":
         return "#FFBF00"; // amber
       case "captured":
       case "recovered":
         return "#00FF66"; // green
       default:
-        return "#FF0033";
+        return matTheme.primaryColor;
     }
-  }, [debris.status, debris.subStatus]);
+  }, [debris.status, debris.subStatus, matTheme]);
 
   // Unique tumbling rate & axes for each debris object
   const spinVector = useMemo(() => {
@@ -1507,6 +1570,19 @@ function DebrisMesh({
           scale={baseScale}
         />
       </group>
+
+      {/* Subtle Space Visibility Aura (Allows spotting debris in dark space) */}
+      {debris.status === "available" && (
+        <mesh>
+          <sphereGeometry args={[baseScale * 0.95, 10, 10]} />
+          <meshBasicMaterial
+            color={matTheme.emissiveColor}
+            transparent
+            opacity={selected ? 0.45 : 0.28}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
 
       {/* Tractor Field Containment Cage during Active Detumble */}
       {debris.subStatus === "detumbling" && (
@@ -1913,9 +1989,10 @@ function DebrisOrbitRing({
 
   if (debris.status === "recovered") return null;
 
-  const color = isTargeted ? "#FFBF00" : selected ? "#00FFFF" : "#38bdf8";
-  const lineWidth = isTargeted ? 2.6 : selected ? 1.8 : 0.6;
-  const opacity = isTargeted ? 0.9 : selected ? 0.75 : 0.16;
+  const matTheme = useMemo(() => getDebrisMaterialTheme(debris.material), [debris.material]);
+  const color = isTargeted ? "#FFBF00" : selected ? "#00FFFF" : matTheme.orbitRingColor;
+  const lineWidth = isTargeted ? 2.6 : selected ? 1.8 : 0.75;
+  const opacity = isTargeted ? 0.9 : selected ? 0.75 : 0.22;
 
   return (
     <Line

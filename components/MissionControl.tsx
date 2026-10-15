@@ -20,6 +20,7 @@ import {
   getDroneWorldPosition,
   getStationOrbitalPosition
 } from "@/lib/orbital";
+import { getDebrisMaterialTheme } from "@/lib/materials";
 
 const debrisStatusTone: Record<DebrisStatus, string> = {
   available: "text-crimson border-crimson/50 bg-crimson/10",
@@ -142,6 +143,7 @@ export default function MissionControl() {
   }, []);
 
   const selected = debris.find((item) => item.id === selectedDebrisId) ?? debris[0];
+  const selectedTheme = useMemo(() => getDebrisMaterialTheme(selected?.material), [selected?.material]);
 
   const availableDebrisCount = debris.filter((item) => item.status === "available").length;
   const idleDroneCount = drones.filter((drone) => drone.status === "idle").length;
@@ -306,6 +308,7 @@ export default function MissionControl() {
             {debris.map((item) => {
               const isSelected = item.id === selected?.id;
               const assignedTo = drones.find((d) => d.targetId === item.id);
+              const matTheme = getDebrisMaterialTheme(item.material);
               return (
                 <div
                   key={item.id}
@@ -321,7 +324,17 @@ export default function MissionControl() {
                 >
                   <span className="row-index">{item.id}</span>
                   <div className="row-copy">
-                    <strong>{item.material ?? "Orbital Debris"}</strong>
+                    <strong className="flex items-center gap-1.5 truncate">
+                      <span
+                        className="inline-block w-2 h-2 rounded-full shrink-0 shadow-sm"
+                        style={{
+                          backgroundColor: matTheme.primaryColor,
+                          boxShadow: `0 0 6px ${matTheme.emissiveColor}`
+                        }}
+                        title={matTheme.name}
+                      />
+                      <span className="truncate">{item.material ?? "Orbital Debris"}</span>
+                    </strong>
                     <small>
                       {item.mass} kg · {formatLogValue(item.value)}
                     </small>
@@ -643,7 +656,22 @@ export default function MissionControl() {
                     <div className="island-info">
                       <div className="island-title">
                         <strong>{selected.id}</strong>
-                        <span className="island-pill-badge">{selected.material}</span>
+                        <span
+                          className="island-pill-badge flex items-center gap-1.5"
+                          style={{
+                            borderColor: `${selectedTheme.primaryColor}55`,
+                            color: selectedTheme.primaryColor
+                          }}
+                        >
+                          <span
+                            className="inline-block w-1.5 h-1.5 rounded-full"
+                            style={{
+                              backgroundColor: selectedTheme.primaryColor,
+                              boxShadow: `0 0 5px ${selectedTheme.emissiveColor}`
+                            }}
+                          />
+                          {selected.material}
+                        </span>
                         {selected.threatIndex !== undefined && (
                           <span
                             className={`island-threat-pill ${
@@ -726,7 +754,19 @@ export default function MissionControl() {
                     </div>
                     <div className="focus-title">
                   <h2>{selected.id}</h2>
-                  <span className="target-mat">{selected.material}</span>
+                  <span
+                    className="target-mat flex items-center gap-1.5"
+                    style={{ color: selectedTheme.primaryColor }}
+                  >
+                    <span
+                      className="inline-block w-2 h-2 rounded-full"
+                      style={{
+                        backgroundColor: selectedTheme.primaryColor,
+                        boxShadow: `0 0 6px ${selectedTheme.emissiveColor}`
+                      }}
+                    />
+                    {selected.material}
+                  </span>
                 </div>
 
                 <div className="focus-meta-grid">
