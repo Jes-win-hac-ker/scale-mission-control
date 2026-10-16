@@ -18,6 +18,7 @@ import {
   getDebrisSpatialCoordinates,
   getDifferentialVectorState,
   getDroneWorldPosition,
+  getGlobalSimTime,
   getStationOrbitalPosition
 } from "@/lib/orbital";
 import { getDebrisMaterialTheme } from "@/lib/materials";
@@ -206,10 +207,11 @@ export default function MissionControl() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selected, idleDroneCount, availableDebrisCount, goFetch, autoDispatch]);
 
-  const [liveSec, setLiveSec] = useState(() => (Date.now() - missionStartedAt) / 1000);
+  const [liveSec, setLiveSec] = useState(() => getGlobalSimTime() || (Date.now() - missionStartedAt) / 1000);
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setLiveSec((Date.now() - missionStartedAt) / 1000);
+      const simTime = getGlobalSimTime();
+      setLiveSec(simTime > 0 ? simTime : (Date.now() - missionStartedAt) / 1000);
     }, 150);
     return () => window.clearInterval(timer);
   }, [missionStartedAt]);

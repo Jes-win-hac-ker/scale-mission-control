@@ -503,24 +503,66 @@ function DroneGLBModel({
 }) {
   const { scene } = useGLTF("/scale-extraction-drone.glb");
 
-  const cloned = useMemo(() => {
+  const { cloned, accentMaterials } = useMemo(() => {
     const clone = scene.clone(true);
+    // Keep only the 5 articulated drone sub-assemblies, stripping the stray demo debris cube (Node[89] at z=0.95)
+    const validDroneGroups = new Set([
+      "CentralChassis",
+      "CaptureMechanism",
+      "MainIonThruster",
+      "RCSPods",
+      "SolarWings"
+    ]);
+    const rootNode = clone.children[0];
+    if (rootNode && rootNode.children.length > 0) {
+      for (let i = rootNode.children.length - 1; i >= 0; i--) {
+        const child = rootNode.children[i];
+        if (!validDroneGroups.has(child.name)) {
+          rootNode.remove(child);
+        }
+      }
+    }
+
+    const accents: THREE.Material[] = [];
     clone.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        const cloneMat = (m: THREE.Material) => {
+          const mc = m.clone();
+          const std = mc as THREE.MeshStandardMaterial;
+          if (std.emissive && (std.emissive.g > 0.4 || std.emissive.b > 0.4)) {
+            accents.push(mc);
+          } else if ((mc as THREE.MeshBasicMaterial).isMeshBasicMaterial && mc.transparent) {
+            accents.push(mc);
+          }
+          return mc;
+        };
         if (mesh.material) {
           if (Array.isArray(mesh.material)) {
-            mesh.material = mesh.material.map((m) => m.clone());
+            mesh.material = mesh.material.map(cloneMat);
           } else {
-            mesh.material = mesh.material.clone();
+            mesh.material = cloneMat(mesh.material);
           }
         }
       }
     });
-    return clone;
+    return { cloned: clone, accentMaterials: accents };
   }, [scene]);
+
+  // Synchronize drone chassis LED strips and claw emitter rings with mission status color
+  useEffect(() => {
+    for (const mat of accentMaterials) {
+      const std = mat as THREE.MeshStandardMaterial;
+      if (std.emissive) {
+        std.emissive.set(color);
+      }
+      if ((mat as any).color) {
+        (mat as any).color.set(color);
+      }
+    }
+  }, [accentMaterials, color]);
 
   // Articulate forward capture mechanism when clamping, detumbling, or towing
   useEffect(() => {
@@ -554,9 +596,7 @@ function DroneMesh({
   const modelRef = useRef<THREE.Group>(null);
   const thrusterRef = useRef<THREE.Group>(null);
   const debrisList = useMissionStore((state) => state.debris);
-  const depot = useMissionStore((state) => state.depot);
   const focusEntity = useMissionStore((state) => state.focusEntity);
-  const dockingQueue = useMissionStore((state) => state.dockingQueue);
 
   const [flightPhase, setFlightPhase] = useState<"accel" | "coast" | "brake">("accel");
 
@@ -601,25 +641,28 @@ function DroneMesh({
     return null;
   }, [drone.targetId, drone.status, drone.subStatus, debrisList]);
 
-  const isDocked = drone.status === "idle" || drone.status === "recovered" || drone.subStatus === "docked";
+  const isDocked =
+    (drone.status === "idle" || drone.subStatus === "docked") &&
+    drone.subStatus !== "docking" &&
+    drone.subStatus !== "ingesting";
 
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
 
-    // 1. In Flight along Curved Orbital Transfer Arc
-    if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+    const pos = getDroneWorldPosition(drone, clock.elapsedTime, clock.elapsedTime, debrisList);
+    groupRef.current.position.set(pos[0], pos[1], pos[2]);
+
+    // 1. In Flight along Curved Orbital Transfer Arc (Intercept or Return)
+    if (
+      drone.flight &&
+      (drone.flight.type === "intercept" || drone.flight.type === "return") &&
+      (drone.status === "intercepting" || drone.status === "returning")
+    ) {
       const elapsed = drone.flight.startSimTime !== undefined
         ? clock.elapsedTime - drone.flight.startSimTime
         : (Date.now() - drone.flight.startTime) / 1000;
-      const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+      const progress = Math.min(1, Math.max(0, elapsed / Math.max(0.05, drone.flight.duration)));
 
-      const pos = calculateBlendedDroneFlightPosition(drone, clock.elapsedTime, debrisList);
-      groupRef.current.position.set(pos[0], pos[1], pos[2]);
-
-      // Dynamic Flight Regimes:
-      // - progress < 0.38: Acceleration burn (prograde)
-      // - 0.38 <= progress <= 0.68: Coasting
-      // - progress > 0.68: Retrograde braking burn (180° flip to decelerate)
       let phase: "accel" | "coast" | "brake" = "accel";
       if (progress > 0.68) {
         phase = "brake";
@@ -631,7 +674,6 @@ function DroneMesh({
       }
 
       if (modelRef.current) {
-        // Forward tangent along live blended trajectory
         const nextTime = clock.elapsedTime + 0.05;
         const nextPos = calculateBlendedDroneFlightPosition(drone, nextTime, debrisList);
         const heading = new THREE.Vector3(
@@ -656,7 +698,6 @@ function DroneMesh({
         }
       }
 
-      // Animate thruster flame scale based on burn regime
       if (thrusterRef.current) {
         if (phase === "accel") {
           thrusterRef.current.scale.set(1, 1 + Math.sin(clock.elapsedTime * 22) * 0.15, 1.4);
@@ -669,88 +710,58 @@ function DroneMesh({
     } else if (drone.status === "capturing") {
       // 2. Co-Orbital Target Rendezvous & Active Extraction: Detumble & Clamping
       const targetDebris = drone.targetId ? debrisList.find((d) => d.id === drone.targetId) : null;
-      if (targetDebris) {
+      if (targetDebris && modelRef.current) {
         const dPos = getDebrisOrbitalPosition(targetDebris, clock.elapsedTime);
         const dVec = new THREE.Vector3(...dPos);
-        const outward = dVec.clone().normalize();
 
         if (drone.subStatus === "detumbling") {
-          // Drone stands off along outward vector (0.09m), facing target with tractor beam
-          const standOff = dVec.clone().addScaledVector(outward, 0.09);
-          groupRef.current.position.set(standOff.x, standOff.y, standOff.z);
-          if (modelRef.current) {
-            modelRef.current.up.set(0, 1, 0);
-            modelRef.current.lookAt(dVec);
-            // Spin-matching attitude micro-adjustments
-            modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 9) * 0.06;
-          }
+          modelRef.current.up.set(0, 1, 0);
+          modelRef.current.lookAt(dVec);
+          modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 9) * 0.06;
         } else {
-          // Clamping: Latched in rigid contact with target (smooth contact glide)
-          groupRef.current.position.lerp(dVec, 0.2);
-          if (modelRef.current) {
-            modelRef.current.up.set(0, 1, 0);
-            modelRef.current.lookAt(new THREE.Vector3(0, 0, 0));
-            modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.1);
-            modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.1);
-          }
+          modelRef.current.up.set(0, 1, 0);
+          modelRef.current.lookAt(new THREE.Vector3(0, 0, 0));
+          modelRef.current.rotation.x = THREE.MathUtils.lerp(modelRef.current.rotation.x, 0, 0.1);
+          modelRef.current.rotation.z = THREE.MathUtils.lerp(modelRef.current.rotation.z, 0, 0.1);
         }
-      } else {
-        groupRef.current.position.set(drone.position[0], drone.position[1], drone.position[2]);
       }
-    } else if (drone.subStatus === "holding") {
-      // 2.5. Holding Pattern: Stand off in assigned station-keeping slot while waiting for smelting corridor to clear
-      const queueIndex = dockingQueue.indexOf(drone.id);
-      const slotIndex = queueIndex >= 0 ? queueIndex : 0;
-      const holdingPos = getStationHoldingPosition(slotIndex, clock.elapsedTime);
-      groupRef.current.position.lerp(new THREE.Vector3(...holdingPos), 0.1);
-
+    } else if (drone.subStatus === "holding" || drone.subStatus === "ingesting") {
+      // 3. Holding Pattern or Underside Refinery Ingestion Stand-off
       if (modelRef.current) {
-        // Face toward station intake with subtle station-keeping attitude
+        const stationTrans = getStationTransform(clock.elapsedTime);
+        modelRef.current.up.set(...stationTrans.prograde);
         const intake = getSmeltingIntakePosition(clock.elapsedTime);
         modelRef.current.lookAt(new THREE.Vector3(...intake));
-        // Attitude micro-oscillation for active RCS station keeping
-        modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 4 + slotIndex) * 0.02;
-      }
-    } else if (drone.subStatus === "ingesting") {
-      // 3. Underside Refinery Ingestion Stand-off: holding below moving station intake
-      const standOff = getSmeltingStandOffPosition(clock.elapsedTime);
-      groupRef.current.position.set(standOff[0], standOff[1], standOff[2]);
-      if (modelRef.current) {
-        // Face upwards toward the smelting reactor funnel
-        const intake = getSmeltingIntakePosition(clock.elapsedTime);
-        modelRef.current.lookAt(new THREE.Vector3(...intake));
+        if (drone.subStatus === "holding") {
+          const slotIdx = drone.holdingSlot ?? 0;
+          modelRef.current.rotation.z += Math.sin(clock.elapsedTime * 4 + slotIdx) * 0.02;
+        }
       }
     } else if (drone.subStatus === "docking") {
-      // 4. Ascent from Refinery Stand-off to Assigned Berth on moving station
-      const berthPos = getBerthWorldPosition(drone.berthId, clock.elapsedTime);
-      groupRef.current.position.lerp(new THREE.Vector3(...berthPos), 0.08);
-
+      // 4. Curved Ascent from Refinery Stand-off around Station Exterior to Assigned Berth
       if (modelRef.current) {
         const stationTrans = getStationTransform(clock.elapsedTime);
         const ringAngle = getStationRingAngle(clock.elapsedTime);
         const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
         modelRef.current.up.set(...stationTrans.zenith);
         const lookTarget = new THREE.Vector3(
-          berthPos[0] + normal[0],
-          berthPos[1] + normal[1],
-          berthPos[2] + normal[2]
+          pos[0] + normal[0],
+          pos[1] + normal[1],
+          pos[2] + normal[2]
         );
         modelRef.current.lookAt(lookTarget);
       }
     } else {
       // 5. Docked at Station Berths: Synchronize with station orbital transit and ring rotation
-      const berthPos = getBerthWorldPosition(drone.berthId, clock.elapsedTime);
-      groupRef.current.position.set(berthPos[0], berthPos[1], berthPos[2]);
-
       if (modelRef.current) {
         const stationTrans = getStationTransform(clock.elapsedTime);
         const ringAngle = getStationRingAngle(clock.elapsedTime);
         const normal = getBerthOutwardNormal(drone.berthId, ringAngle, stationTrans.quaternion);
         modelRef.current.up.set(...stationTrans.zenith);
         const lookTarget = new THREE.Vector3(
-          berthPos[0] + normal[0],
-          berthPos[1] + normal[1],
-          berthPos[2] + normal[2]
+          pos[0] + normal[0],
+          pos[1] + normal[1],
+          pos[2] + normal[2]
         );
         modelRef.current.lookAt(lookTarget);
       }
@@ -944,7 +955,7 @@ function DroneMesh({
   );
 }
 
-// 3D GLB Model Instance for Spent Rocket Stage Debris
+// 3D Aerospace Cryogenic Upper Rocket Stage & Bell Engine Nozzle Model
 function RocketStageModel({
   color,
   materialTheme,
@@ -958,47 +969,145 @@ function RocketStageModel({
   opacity?: number;
   scale?: number;
 }) {
-  const { scene } = useGLTF("/scale-extraction-drone-debry.glb");
+  const hullCol = wireframe ? color : (materialTheme?.primaryColor || "#E2E8F0");
+  const accentCol = wireframe ? color : (materialTheme?.accentColor || "#38BDF8");
+  const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#93C5FD");
+  const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.24);
+  const metalness = materialTheme?.metalness ?? 0.85;
+  const roughness = materialTheme?.roughness ?? 0.22;
 
-  const cloned = useMemo(() => {
-    const aux = scene.children[0];
-    const rocketNode = aux?.children[5];
-    if (!rocketNode) return new THREE.Group();
+  return (
+    <group scale={scale} rotation={[0.45, 0.25, 0.3]}>
+      {/* Main Cryogenic Propellant Tank Cylinder */}
+      <mesh>
+        <cylinderGeometry args={[0.34, 0.34, 1.15, 24]} />
+        <meshStandardMaterial
+          color={hullCol}
+          emissive={emissiveCol}
+          emissiveIntensity={emissiveInt}
+          metalness={metalness}
+          roughness={roughness}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
 
-    const clone = rocketNode.clone(true);
-    // Center rocket along Z (offset ~ -0.8775)
-    clone.position.set(0, 0, -0.8775);
+      {/* Forward Dome Bulkhead */}
+      <mesh position={[0, 0.575, 0]}>
+        <sphereGeometry args={[0.335, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+        <meshStandardMaterial
+          color={accentCol}
+          emissive={emissiveCol}
+          emissiveIntensity={emissiveInt * 0.9}
+          metalness={0.88}
+          roughness={0.25}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
 
-    const baseCol = wireframe ? color : (materialTheme?.primaryColor || "#E2E8F0");
-    const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#93C5FD");
-    const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.22);
-    const metalness = materialTheme?.metalness ?? 0.85;
-    const roughness = materialTheme?.roughness ?? 0.25;
+      {/* Forward Interstage Adapter Skirt Collar */}
+      <mesh position={[0, 0.62, 0]}>
+        <cylinderGeometry args={[0.355, 0.355, 0.22, 24, 1, true]} />
+        <meshStandardMaterial
+          color={wireframe ? color : "#1e293b"}
+          emissive={emissiveCol}
+          emissiveIntensity={emissiveInt * 0.6}
+          metalness={0.75}
+          roughness={0.4}
+          side={THREE.DoubleSide}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
 
-    clone.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.material = new THREE.MeshStandardMaterial({
-          color: baseCol,
-          emissive: emissiveCol,
-          emissiveIntensity: emissiveInt,
-          metalness: metalness,
-          roughness: roughness,
-          wireframe: !!wireframe,
-          transparent: opacity < 1,
-          opacity: opacity
-        });
-      }
-    });
+      {/* Circumferential Structural Intertank Rings */}
+      {[-0.36, 0.0, 0.36].map((yPos, idx) => (
+        <mesh key={`ring-${idx}`} position={[0, yPos, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.35, 0.024, 10, 28]} />
+          <meshStandardMaterial
+            color={accentCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt * 1.15}
+            metalness={0.92}
+            roughness={0.18}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+      ))}
 
-    const wrapper = new THREE.Group();
-    wrapper.add(clone);
-    return wrapper;
-  }, [scene, color, materialTheme, wireframe, opacity]);
+      {/* External LOX / LH2 Propellant Feedline Conduits */}
+      {[0, Math.PI].map((ang, idx) => (
+        <mesh
+          key={`feed-${idx}`}
+          position={[Math.cos(ang) * 0.355, -0.05, Math.sin(ang) * 0.355]}
+        >
+          <cylinderGeometry args={[0.032, 0.032, 1.05, 8]} />
+          <meshStandardMaterial
+            color={accentCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
+            metalness={0.9}
+            roughness={0.2}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+      ))}
 
-  return <primitive object={cloned} scale={scale} />;
+      {/* Aft Engine Thrust Structure Cone */}
+      <mesh position={[0, -0.66, 0]}>
+        <cylinderGeometry args={[0.32, 0.16, 0.18, 20]} />
+        <meshStandardMaterial
+          color={wireframe ? color : "#334155"}
+          emissive={emissiveCol}
+          emissiveIntensity={emissiveInt * 0.5}
+          metalness={0.85}
+          roughness={0.35}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
+
+      {/* Parabolic Vacuum Bell Engine Nozzle */}
+      <mesh position={[0, -0.94, 0]}>
+        <cylinderGeometry args={[0.13, 0.31, 0.44, 24, 1, true]} />
+        <meshStandardMaterial
+          color={wireframe ? color : "#475569"}
+          emissive={wireframe ? color : "#38bdf8"}
+          emissiveIntensity={emissiveInt * 0.8}
+          metalness={0.94}
+          roughness={0.22}
+          side={THREE.DoubleSide}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
+
+      {/* Nozzle Regenerative Cooling Manifold Ring */}
+      <mesh position={[0, -1.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.285, 0.018, 8, 24]} />
+        <meshStandardMaterial
+          color={accentCol}
+          emissive={emissiveCol}
+          emissiveIntensity={emissiveInt * 1.2}
+          metalness={0.9}
+          roughness={0.2}
+          wireframe={wireframe}
+          transparent={opacity < 1}
+          opacity={opacity}
+        />
+      </mesh>
+    </group>
+  );
 }
 
 // 3D GLB Model Instance for Chondrite Meteorite / Asteroid Debris
@@ -1027,22 +1136,26 @@ function MeteoriteModel({
     clone.position.set(0, 0, 0);
 
     const baseCol = wireframe ? color : (materialTheme?.primaryColor || "#D97706");
-    const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#B45309");
-    const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.24);
+    const noduleCol = wireframe ? color : (materialTheme?.accentColor || "#FBBF24");
+    const emissiveCol = wireframe ? color : (materialTheme?.emissiveColor || "#F59E0B");
+    const emissiveInt = wireframe ? 0.6 : (materialTheme?.emissiveIntensity || 0.28);
     const metalness = materialTheme?.metalness ?? 0.35;
-    const roughness = materialTheme?.roughness ?? 0.75;
+    const roughness = materialTheme?.roughness ?? 0.72;
 
+    let meshIdx = 0;
     clone.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
+        const isMineralNodule = meshIdx > 0;
+        meshIdx++;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.material = new THREE.MeshStandardMaterial({
-          color: baseCol,
-          emissive: emissiveCol,
-          emissiveIntensity: emissiveInt,
-          metalness: metalness,
-          roughness: roughness,
+          color: isMineralNodule ? noduleCol : baseCol,
+          emissive: isMineralNodule ? noduleCol : emissiveCol,
+          emissiveIntensity: isMineralNodule ? emissiveInt * 1.45 : emissiveInt,
+          metalness: isMineralNodule ? Math.min(0.95, metalness + 0.35) : metalness,
+          roughness: isMineralNodule ? Math.max(0.18, roughness - 0.35) : roughness,
           wireframe: !!wireframe,
           transparent: opacity < 1,
           opacity: opacity
@@ -1058,7 +1171,7 @@ function MeteoriteModel({
   return <primitive object={cloned} scale={scale} />;
 }
 
-// Debris Geometries: Realistic 3D Rocket Parts, Meteorites, Solar Arrays, and Shielding
+// Debris Geometries: Distinct 3D Aerospace Models for Every Debris Category
 function DebrisShape({
   material,
   color,
@@ -1074,22 +1187,28 @@ function DebrisShape({
 }) {
   const mat = (material || "").toLowerCase();
   const theme = getDebrisMaterialTheme(material);
+  const primaryCol = wireframe ? color : theme.primaryColor;
+  const accentCol = wireframe ? color : theme.accentColor;
+  const emissiveCol = wireframe ? color : theme.emissiveColor;
+  const emissiveInt = wireframe ? 0.6 : theme.emissiveIntensity;
 
-  // 1. Defunct Satellite / Solar Array / Battery
-  if (mat.includes("solar") || mat.includes("battery")) {
-    const isBattery = mat.includes("battery");
-    const bodyColor = wireframe ? color : isBattery ? theme.primaryColor : theme.primaryColor;
-    const panelColor = wireframe ? color : isBattery ? theme.accentColor : theme.accentColor;
-    const emissiveCol = wireframe ? color : theme.emissiveColor;
-    const emissiveInt = wireframe ? 0.6 : theme.emissiveIntensity;
-
+  // 1. Nickel-Cadmium Aerospace Battery Pack (Multi-Cell Power Bank)
+  if (mat.includes("battery") || mat.includes("nickel") || mat.includes("cadmium")) {
+    const cellOffsets: [number, number][] = [
+      [-0.36, -0.18],
+      [0.0, -0.18],
+      [0.36, -0.18],
+      [-0.36, 0.18],
+      [0.0, 0.18],
+      [0.36, 0.18]
+    ];
     return (
       <group scale={scale}>
-        {/* Central Satellite / Battery Body */}
-        <mesh>
-          <boxGeometry args={[0.7, 0.7, 0.7]} />
+        {/* Insulated Thermal Containment Tray */}
+        <mesh position={[0, -0.18, 0]}>
+          <boxGeometry args={[1.18, 0.32, 0.78]} />
           <meshStandardMaterial
-            color={bodyColor}
+            color={primaryCol}
             emissive={emissiveCol}
             emissiveIntensity={emissiveInt}
             metalness={theme.metalness}
@@ -1099,64 +1218,70 @@ function DebrisShape({
             opacity={opacity}
           />
         </mesh>
-        {/* Left Solar Panel / Battery Cell Flank */}
-        <mesh position={[-1.15, 0, 0]}>
-          <boxGeometry args={[1.3, 0.55, 0.05]} />
-          <meshStandardMaterial
-            color={panelColor}
-            emissive={panelColor}
-            emissiveIntensity={emissiveInt * 0.7}
-            metalness={0.85}
-            roughness={0.2}
-            wireframe={wireframe}
-            transparent={opacity < 1}
-            opacity={opacity}
-          />
-        </mesh>
-        {/* Right Solar Panel / Battery Cell Flank */}
-        <mesh position={[1.15, 0, 0]}>
-          <boxGeometry args={[1.3, 0.55, 0.05]} />
-          <meshStandardMaterial
-            color={panelColor}
-            emissive={panelColor}
-            emissiveIntensity={emissiveInt * 0.7}
-            metalness={0.85}
-            roughness={0.2}
-            wireframe={wireframe}
-            transparent={opacity < 1}
-            opacity={opacity}
-          />
-        </mesh>
-        {/* High-gain Antenna Rod */}
-        <mesh position={[0, 0.55, 0]}>
-          <cylinderGeometry args={[0.03, 0.03, 0.45, 6]} />
-          <meshStandardMaterial
-            color={wireframe ? color : "#f8fafc"}
-            emissive={wireframe ? color : "#94a3b8"}
-            emissiveIntensity={0.2}
-            metalness={0.9}
-            roughness={0.1}
-            transparent={opacity < 1}
-            opacity={opacity}
-          />
-        </mesh>
+
+        {/* 6 Cylindrical NiCd Cells & Gold Terminal Caps */}
+        {cellOffsets.map(([cx, cz], idx) => (
+          <group key={`cell-${idx}`} position={[cx, 0.12, cz]}>
+            <mesh>
+              <cylinderGeometry args={[0.13, 0.13, 0.48, 16]} />
+              <meshStandardMaterial
+                color={wireframe ? color : "#334155"}
+                emissive={emissiveCol}
+                emissiveIntensity={emissiveInt * 0.65}
+                metalness={0.85}
+                roughness={0.28}
+                wireframe={wireframe}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
+            <mesh position={[0, 0.26, 0]}>
+              <cylinderGeometry args={[0.07, 0.07, 0.06, 12]} />
+              <meshStandardMaterial
+                color={accentCol}
+                emissive={accentCol}
+                emissiveIntensity={emissiveInt * 1.3}
+                metalness={0.95}
+                roughness={0.15}
+                wireframe={wireframe}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
+          </group>
+        ))}
+
+        {/* High-Current Interconnect Busbar Rails */}
+        {[-0.18, 0.18].map((cz, idx) => (
+          <mesh key={`busbar-${idx}`} position={[0, 0.4, cz]}>
+            <boxGeometry args={[0.88, 0.04, 0.06]} />
+            <meshStandardMaterial
+              color={accentCol}
+              emissive={emissiveCol}
+              emissiveIntensity={emissiveInt * 1.2}
+              metalness={0.95}
+              roughness={0.15}
+              wireframe={wireframe}
+              transparent={opacity < 1}
+              opacity={opacity}
+            />
+          </mesh>
+        ))}
       </group>
     );
   }
 
-  // 2. Titanium Shielding Shard (Aerospace Whipple Plate)
-  if (mat.includes("shield") || mat.includes("titanium")) {
-    const plateColor = wireframe ? color : theme.primaryColor;
-    const ribColor = wireframe ? color : theme.accentColor;
+  // 2. Defunct Satellite / Solar Array Wing Assembly
+  if (mat.includes("solar")) {
     return (
       <group scale={scale}>
-        {/* Main Curved Whipple Shield Plate */}
-        <mesh rotation={[0.3, 0.4, 0.2]}>
-          <boxGeometry args={[1.4, 0.9, 0.08]} />
+        {/* Central Satellite Bus */}
+        <mesh>
+          <boxGeometry args={[0.68, 0.68, 0.68]} />
           <meshStandardMaterial
-            color={plateColor}
-            emissive={theme.emissiveColor}
-            emissiveIntensity={theme.emissiveIntensity}
+            color={primaryCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
             metalness={theme.metalness}
             roughness={theme.roughness}
             wireframe={wireframe}
@@ -1164,14 +1289,111 @@ function DebrisShape({
             opacity={opacity}
           />
         </mesh>
-        {/* Structural Stiffener Rib */}
-        <mesh position={[0, 0, 0.06]} rotation={[0.3, 0.4, 0.2]}>
-          <boxGeometry args={[1.2, 0.12, 0.06]} />
+        {/* Left & Right Photovoltaic Solar Wings */}
+        {[-1.18, 1.18].map((xPos, idx) => (
+          <group key={`wing-${idx}`} position={[xPos, 0, 0]}>
+            <mesh>
+              <boxGeometry args={[1.35, 0.58, 0.045]} />
+              <meshStandardMaterial
+                color={accentCol}
+                emissive={accentCol}
+                emissiveIntensity={emissiveInt * 0.75}
+                metalness={0.88}
+                roughness={0.18}
+                wireframe={wireframe}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
+            {/* Structural Deployment Yoke Boom */}
+            <mesh position={[xPos > 0 ? -0.72 : 0.72, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.03, 0.03, 0.35, 8]} />
+              <meshStandardMaterial
+                color={primaryCol}
+                emissive={emissiveCol}
+                emissiveIntensity={emissiveInt * 0.8}
+                metalness={0.9}
+                roughness={0.2}
+                wireframe={wireframe}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
+          </group>
+        ))}
+        {/* High-Gain Telemetry Antenna Dish & Mast */}
+        <mesh position={[0, 0.56, 0]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.45, 8]} />
           <meshStandardMaterial
-            color={ribColor}
-            emissive={theme.emissiveColor}
-            emissiveIntensity={theme.emissiveIntensity * 1.2}
+            color={wireframe ? color : "#f8fafc"}
+            emissive={wireframe ? color : "#94a3b8"}
+            emissiveIntensity={0.25}
             metalness={0.9}
+            roughness={0.12}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 3. Reaction Wheel Core (Attitude Control Flywheel Gyroscope Assembly)
+  if (mat.includes("wheel") || mat.includes("reaction")) {
+    return (
+      <group scale={scale} rotation={[0.35, 0.2, 0.15]}>
+        {/* Heavy Outer Momentum Flywheel Rim */}
+        <mesh>
+          <torusGeometry args={[0.78, 0.16, 16, 36]} />
+          <meshStandardMaterial
+            color={primaryCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
+            metalness={theme.metalness}
+            roughness={theme.roughness}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* Precision Inner Stator Ring */}
+        <mesh>
+          <torusGeometry args={[0.42, 0.055, 12, 28]} />
+          <meshStandardMaterial
+            color={accentCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt * 1.25}
+            metalness={0.92}
+            roughness={0.18}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* 4 Radial Structural Flywheel Spokes */}
+        {[0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4].map((ang, idx) => (
+          <mesh key={`spoke-${idx}`} rotation={[0, 0, ang]}>
+            <cylinderGeometry args={[0.045, 0.045, 1.5, 10]} />
+            <meshStandardMaterial
+              color={accentCol}
+              emissive={emissiveCol}
+              emissiveIntensity={emissiveInt * 0.9}
+              metalness={0.88}
+              roughness={0.22}
+              wireframe={wireframe}
+              transparent={opacity < 1}
+              opacity={opacity}
+            />
+          </mesh>
+        ))}
+        {/* Central Brushless Magnetic Bearing Stator Hub */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.26, 0.26, 0.42, 20]} />
+          <meshStandardMaterial
+            color={primaryCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt * 1.15}
+            metalness={0.92}
             roughness={0.2}
             wireframe={wireframe}
             transparent={opacity < 1}
@@ -1182,23 +1404,111 @@ function DebrisShape({
     );
   }
 
-  // 3. Spent Rocket Stage / Booster / Reaction Wheel / Fairing -> 3D Rocket GLB Model
+  // 4. Aluminium Payload Fairing Half-Shell & Thrust Adapter Ring
+  if (mat.includes("fairing") || mat.includes("aluminium")) {
+    return (
+      <group scale={scale} rotation={[0.25, 0.4, -0.2]}>
+        {/* Curved Clamshell Payload Fairing Half-Cylinder */}
+        <mesh position={[0, 0.05, 0]}>
+          <cylinderGeometry args={[0.52, 0.68, 1.15, 24, 1, true, 0, Math.PI * 1.05]} />
+          <meshStandardMaterial
+            color={primaryCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
+            metalness={theme.metalness}
+            roughness={theme.roughness}
+            side={THREE.DoubleSide}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* Nose Cone Ogive Cap Section */}
+        <mesh position={[0, 0.62, 0]}>
+          <coneGeometry args={[0.52, 0.55, 24, 1, true, 0, Math.PI * 1.05]} />
+          <meshStandardMaterial
+            color={accentCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt * 0.9}
+            metalness={0.88}
+            roughness={0.22}
+            side={THREE.DoubleSide}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* Base Separation Thrust Ring */}
+        <mesh position={[0, -0.52, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.68, 0.065, 12, 32]} />
+          <meshStandardMaterial
+            color={accentCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt * 1.2}
+            metalness={0.92}
+            roughness={0.18}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+      </group>
+    );
+  }
+
+  // 5. Titanium Shielding Shard (Aerospace Whipple Armor Plate)
+  if (mat.includes("shield") || mat.includes("titanium")) {
+    return (
+      <group scale={scale} rotation={[0.3, 0.4, 0.2]}>
+        {/* Main Curved Whipple Shield Armor Plate */}
+        <mesh>
+          <boxGeometry args={[1.42, 0.92, 0.09]} />
+          <meshStandardMaterial
+            color={primaryCol}
+            emissive={emissiveCol}
+            emissiveIntensity={emissiveInt}
+            metalness={theme.metalness}
+            roughness={theme.roughness}
+            wireframe={wireframe}
+            transparent={opacity < 1}
+            opacity={opacity}
+          />
+        </mesh>
+        {/* Dual Structural Stiffener I-Beams */}
+        {[-0.24, 0.24].map((yOff, idx) => (
+          <mesh key={`rib-${idx}`} position={[0, yOff, 0.065]}>
+            <boxGeometry args={[1.26, 0.11, 0.065]} />
+            <meshStandardMaterial
+              color={accentCol}
+              emissive={emissiveCol}
+              emissiveIntensity={emissiveInt * 1.25}
+              metalness={0.92}
+              roughness={0.18}
+              wireframe={wireframe}
+              transparent={opacity < 1}
+              opacity={opacity}
+            />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  // 6. Spent Rocket Stage / Booster / Engine -> 3D Cryogenic Booster Assembly
   if (
-    mat.includes("wheel") ||
-    mat.includes("fairing") ||
-    mat.includes("reaction") ||
     mat.includes("rocket") ||
+    mat.includes("stage") ||
     mat.includes("booster") ||
     mat.includes("engine")
   ) {
     return (
-      <group scale={scale * 2.2}>
+      <group scale={scale * 1.05}>
         <RocketStageModel color={color} materialTheme={theme} wireframe={wireframe} opacity={opacity} />
       </group>
     );
   }
 
-  // 4. Meteorite / Asteroid / Chondrite / Ferrous Shard -> 3D Meteorite GLB Model
+  // 7. Meteorite / Asteroid / Chondrite / Ferrous Shard -> 3D Meteorite GLB Model
   return (
     <group scale={scale * 2.2}>
       <MeteoriteModel color={color} materialTheme={theme} wireframe={wireframe} opacity={opacity} />
@@ -1489,15 +1799,26 @@ function DebrisMesh({
     if (!groupRef.current) return;
 
     if (debris.subStatus === "ingesting") {
-      // 1. Smelting Vortex Ingestion: Debris floats upwards from moving stand-off into intake core
+      // 1. Smelting Vortex Ingestion: Debris travels smoothly in the station's moving frame from stand-off into intake core
+      const standOffPos = getSmeltingStandOffPosition(clock.elapsedTime);
       const intakePos = getSmeltingIntakePosition(clock.elapsedTime);
-      const targetPos = new THREE.Vector3(...intakePos);
-      groupRef.current.position.lerp(targetPos, 0.08);
+      const elapsedIngest =
+        debris.ingestStartSimTime !== undefined
+          ? Math.max(0, clock.elapsedTime - debris.ingestStartSimTime)
+          : 0.9;
+      const progress = Math.min(1, elapsedIngest / 1.8);
+      const eased = easeInOutQuad(progress);
+
+      groupRef.current.position.set(
+        THREE.MathUtils.lerp(standOffPos[0], intakePos[0], eased),
+        THREE.MathUtils.lerp(standOffPos[1], intakePos[1], eased),
+        THREE.MathUtils.lerp(standOffPos[2], intakePos[2], eased)
+      );
 
       if (visualRef.current) {
         visualRef.current.rotation.y += 0.22;
         visualRef.current.rotation.x += 0.12;
-        visualRef.current.scale.multiplyScalar(0.975);
+        visualRef.current.scale.setScalar(Math.max(0.12, 1 - eased * 0.85));
       }
     } else if (
       debris.status === "captured" &&
@@ -1989,7 +2310,14 @@ function DebrisOrbitRing({
 
   const matTheme = useMemo(() => getDebrisMaterialTheme(debris.material), [debris.material]);
 
-  if (debris.status === "recovered") return null;
+  if (
+    debris.status === "recovered" ||
+    debris.subStatus === "towed" ||
+    debris.subStatus === "ingesting" ||
+    debris.subStatus === "smelted"
+  ) {
+    return null;
+  }
 
   const color = isTargeted ? "#FFBF00" : selected ? "#00FFFF" : matTheme.orbitRingColor;
   const lineWidth = isTargeted ? 2.6 : selected ? 1.8 : 0.75;
@@ -2084,14 +2412,20 @@ function OrbitalScene() {
     if (focusedEntity.type === "debris") {
       const item = debris.find((d) => d.id === focusedEntity.id);
       if (item) {
-        if (item.status === "recovered") {
+        if (
+          item.status === "recovered" ||
+          item.subStatus === "ingesting" ||
+          item.subStatus === "smelted"
+        ) {
           const depotPos = getStationOrbitalPosition(clock.elapsedTime, depot);
           targetVec.set(depotPos[0], depotPos[1], depotPos[2]);
-          targetDistance = 1.35;
+          targetDistance = 1.25;
         } else {
           // If captured and returning with a carrier drone, follow the drone's active transit
           const carrierDrone = drones.find(
-            (d) => d.targetId === item.id && (d.status === "returning" || d.status === "capturing")
+            (d) =>
+              (d.targetId === item.id || item.assignedDroneId === d.id) &&
+              (d.status === "returning" || d.status === "capturing")
           );
           if (carrierDrone) {
             const pos = getDroneWorldPosition(carrierDrone, clock.elapsedTime, clock.elapsedTime, debris);
@@ -2225,7 +2559,10 @@ function OrbitalScene() {
       {/* Dynamic Intercept Guidance Laser Vectors & Energy Pulses */}
       {drones.map((drone) => {
         if (!drone.targetId) return null;
-        if (drone.status !== "intercepting" && drone.status !== "capturing") return null;
+        const isLaserActive =
+          drone.status === "intercepting" ||
+          (drone.status === "capturing" && drone.subStatus === "detumbling");
+        if (!isLaserActive) return null;
         const targetDebris = debris.find((item) => item.id === drone.targetId);
         if (!targetDebris || targetDebris.status === "recovered") return null;
 

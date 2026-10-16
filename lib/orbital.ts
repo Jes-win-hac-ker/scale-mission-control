@@ -91,40 +91,9 @@ export function getDebrisOrbitTrackSamples(
   return samples;
 }
 
-// Calculates elevated 3D control point for orbital transfer arc around Earth's gravity well
-export function getOrbitalArcControlPoint(
-  start: [number, number, number],
-  target: [number, number, number]
-): THREE.Vector3 {
-  const pA = new THREE.Vector3(...start);
-  const pB = new THREE.Vector3(...target);
-  const rA = pA.length();
-  const rB = pB.length();
-
-  const chordMid = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
-  const chordLen = chordMid.length();
-
-  let radialDir: THREE.Vector3;
-  if (chordLen < 0.08) {
-    // Antipodal transfer: select perpendicular vector
-    radialDir = new THREE.Vector3(-pA.y, pA.x, pA.z);
-    if (radialDir.lengthSq() < 0.01) {
-      radialDir = new THREE.Vector3(pA.z, pA.y, -pA.x);
-    }
-    radialDir.normalize();
-  } else {
-    radialDir = chordMid.clone().normalize();
-  }
-
-  // Apex altitude comfortably clears Earth (radius 1.35) and adheres to safe transfer corridor
-  const maxR = Math.max(rA, rB);
-  const apexRadius = Math.max(maxR * 1.15, 1.85);
-
-  // Control point for quadratic Bezier: B(0.5) = 0.5 * chordMid + 0.5 * C = radialDir * apexRadius
-  return radialDir.clone().multiplyScalar(2 * apexRadius).sub(chordMid);
-}
-
-// Interpolates 3D coordinates along curved orbital transfer arc at progress t (0 to 1)
+// Spherical orbital transfer interpolation around Earth's gravity well:
+// Uses unit-vector slerp (with antipodal plane handling) and Hohmann apogee radius boost
+// so trajectories never dip inside Earth's atmosphere (r = 1.44), even for 180° opposite-side transfers.
 export function getOrbitalArcPoint(
   start: [number, number, number],
   target: [number, number, number],
@@ -133,15 +102,51 @@ export function getOrbitalArcPoint(
   const clampedT = Math.min(1, Math.max(0, t));
   const pA = new THREE.Vector3(...start);
   const pB = new THREE.Vector3(...target);
-  const pC = getOrbitalArcControlPoint(start, target);
+  const rA = pA.length();
+  const rB = pB.length();
 
-  const invT = 1 - clampedT;
-  const pos = new THREE.Vector3()
-    .addScaledVector(pA, invT * invT)
-    .addScaledVector(pC, 2 * invT * clampedT)
-    .addScaledVector(pB, clampedT * clampedT);
+  if (rA < 0.001 || rB < 0.001) {
+    return [
+      THREE.MathUtils.lerp(start[0], target[0], clampedT),
+      THREE.MathUtils.lerp(start[1], target[1], clampedT),
+      THREE.MathUtils.lerp(start[2], target[2], clampedT)
+    ];
+  }
 
-  return [pos.x, pos.y, pos.z];
+  const uA = pA.clone().divideScalar(rA);
+  const uB = pB.clone().divideScalar(rB);
+  const dot = THREE.MathUtils.clamp(uA.dot(uB), -1, 1);
+  const omega = Math.acos(dot);
+
+  let dir: THREE.Vector3;
+  if (omega < 0.0005) {
+    dir = uA.clone().lerp(uB, clampedT).normalize();
+  } else if (omega > Math.PI - 0.08) {
+    // Near-antipodal transfer: rotate around a deterministic perpendicular orbital axis
+    let axis = new THREE.Vector3(0, 1, 0).cross(uA);
+    if (axis.lengthSq() < 0.01) {
+      axis = new THREE.Vector3(1, 0, 0).cross(uA);
+    }
+    axis.normalize();
+    dir = uA.clone().applyAxisAngle(axis, omega * clampedT);
+    const endDir = uA.clone().applyAxisAngle(axis, omega);
+    dir.addScaledVector(uB.clone().sub(endDir), clampedT).normalize();
+  } else {
+    const sinOmega = Math.sin(omega);
+    const sA = Math.sin((1 - clampedT) * omega) / sinOmega;
+    const sB = Math.sin(clampedT * omega) / sinOmega;
+    dir = new THREE.Vector3()
+      .addScaledVector(uA, sA)
+      .addScaledVector(uB, sB)
+      .normalize();
+  }
+
+  const baseR = THREE.MathUtils.lerp(rA, rB, clampedT);
+  const chordDist = pA.distanceTo(pB);
+  const archBoost = Math.min(0.85, chordDist * 0.14) * 4 * clampedT * (1 - clampedT);
+  const r = Math.max(1.78, baseR + archBoost);
+
+  return [dir.x * r, dir.y * r, dir.z * r];
 }
 
 // Computes normalized velocity tangent vector along curved orbital transfer arc at progress t
@@ -151,18 +156,24 @@ export function getOrbitalArcTangent(
   t: number
 ): [number, number, number] {
   const clampedT = Math.min(1, Math.max(0, t));
-  const pA = new THREE.Vector3(...start);
-  const pB = new THREE.Vector3(...target);
-  const pC = getOrbitalArcControlPoint(start, target);
+  const dt = 0.01;
+  const t0 = Math.max(0, clampedT - dt);
+  const t1 = Math.min(1, clampedT + dt);
+  const p0 = getOrbitalArcPoint(start, target, t0);
+  const p1 = getOrbitalArcPoint(start, target, t1);
 
-  const invT = 1 - clampedT;
-  const tangent = new THREE.Vector3()
-    .addScaledVector(pC.clone().sub(pA), 2 * invT)
-    .addScaledVector(pB.clone().sub(pC), 2 * clampedT);
-
-  if (tangent.lengthSq() < 0.0001) {
-    const direct = pB.clone().sub(pA).normalize();
-    return [direct.x, direct.y, direct.z];
+  const tangent = new THREE.Vector3(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
+  if (tangent.lengthSq() < 0.000001) {
+    const direct = new THREE.Vector3(
+      target[0] - start[0],
+      target[1] - start[1],
+      target[2] - start[2]
+    );
+    if (direct.lengthSq() > 0.000001) {
+      direct.normalize();
+      return [direct.x, direct.y, direct.z];
+    }
+    return [0, 0, 1];
   }
   tangent.normalize();
   return [tangent.x, tangent.y, tangent.z];
@@ -634,6 +645,49 @@ export function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+// Collision-free station-local curved ascent path from underside smelting stand-off to assigned mooring berth
+export function getDockingAscentPosition(
+  berthId: DroneBerthId,
+  progress: number,
+  timeSec: number
+): [number, number, number] {
+  const eased = easeInOutQuad(Math.min(1, Math.max(0, progress)));
+  const { position, rotationMatrix } = getStationTransform(timeSec);
+  const rotRing = getStationRingAngle(timeSec);
+  const cfg = BERTH_CONFIGS[berthId];
+
+  const pStart = new THREE.Vector3(0, -0.70, 0);
+  let pCtrl: THREE.Vector3;
+  let pEnd: THREE.Vector3;
+
+  if (berthId === "STAGING") {
+    pEnd = new THREE.Vector3(...cfg.localPos);
+    // Arc outward along +Z (clearing the 0.38 equatorial habitat ring and X-axis solar wings)
+    pCtrl = new THREE.Vector3(0, -0.05, 1.05);
+  } else {
+    const cos = Math.cos(rotRing);
+    const sin = Math.sin(rotRing);
+    const rx = cfg.localPos[0] * cos + cfg.localPos[2] * sin;
+    const rz = -cfg.localPos[0] * sin + cfg.localPos[2] * cos;
+    pEnd = new THREE.Vector3(rx, cfg.localPos[1], rz);
+    // Swing outward around the 0.185 smelting funnel cowling before mooring at rim
+    pCtrl = new THREE.Vector3(rx * 1.48, -0.28, rz * 1.48);
+  }
+
+  const invT = 1 - eased;
+  const localVec = new THREE.Vector3()
+    .addScaledVector(pStart, invT * invT)
+    .addScaledVector(pCtrl, 2 * invT * eased)
+    .addScaledVector(pEnd, eased * eased);
+
+  localVec.applyMatrix4(rotationMatrix);
+  return [
+    position[0] + localVec.x,
+    position[1] + localVec.y,
+    position[2] + localVec.z
+  ];
+}
+
 // Computes exact blended 3D coordinates for drones in transit with continuous boundary alignment
 export function calculateBlendedDroneFlightPosition(
   drone: Drone,
@@ -645,15 +699,34 @@ export function calculateBlendedDroneFlightPosition(
   const elapsed = drone.flight.startSimTime !== undefined
     ? timeSec - drone.flight.startSimTime
     : (timeSec * 1000 - drone.flight.startTime) / 1000;
-  const progress = Math.min(1, Math.max(0, elapsed / drone.flight.duration));
+  const progress = Math.min(1, Math.max(0, elapsed / Math.max(0.05, drone.flight.duration)));
   const eased = easeInOutQuad(progress);
+
+  if (drone.flight.type === "docking") {
+    return getDockingAscentPosition(drone.berthId, progress, timeSec);
+  }
+
+  if (drone.flight.type === "holding") {
+    const holdingPos = getStationHoldingPosition(drone.holdingSlot ?? 0, timeSec);
+    return [
+      THREE.MathUtils.lerp(drone.flight.startPosition[0], holdingPos[0], eased),
+      THREE.MathUtils.lerp(drone.flight.startPosition[1], holdingPos[1], eased),
+      THREE.MathUtils.lerp(drone.flight.startPosition[2], holdingPos[2], eased)
+    ];
+  }
+
+  if (drone.flight.type === "ingest_approach") {
+    const standOff = getSmeltingStandOffPosition(timeSec);
+    return [
+      THREE.MathUtils.lerp(drone.flight.startPosition[0], standOff[0], eased),
+      THREE.MathUtils.lerp(drone.flight.startPosition[1], standOff[1], eased),
+      THREE.MathUtils.lerp(drone.flight.startPosition[2], standOff[2], eased)
+    ];
+  }
 
   const arcPos = getOrbitalArcPoint(drone.flight.startPosition, drone.flight.targetPosition, eased);
 
   if (drone.status === "intercepting") {
-    // 1. Live moving berth at launch
-    const liveBerth = getBerthWorldPosition(drone.berthId, timeSec);
-    // 2. Live moving target debris standoff at arrival
     const target = drone.targetId ? debrisList?.find((d) => d.id === drone.targetId) : undefined;
     const liveDebris = target
       ? getDebrisOrbitalPosition(target, timeSec)
@@ -665,32 +738,24 @@ export function calculateBlendedDroneFlightPosition(
       liveDebris[2] + outward.z * 0.09
     ];
 
-    const startBlend = (1 - progress) * (1 - progress);
-    const endBlend = progress * progress;
+    // Follow the true orbital transfer arc and smoothly lock onto the moving target in final terminal approach
+    const endBlend = progress > 0.82 ? Math.pow((progress - 0.82) / 0.18, 2) : 0;
 
     return [
-      arcPos[0] + (liveBerth[0] - drone.flight.startPosition[0]) * startBlend + (liveTarget[0] - drone.flight.targetPosition[0]) * endBlend,
-      arcPos[1] + (liveBerth[1] - drone.flight.startPosition[1]) * startBlend + (liveTarget[1] - drone.flight.targetPosition[1]) * endBlend,
-      arcPos[2] + (liveBerth[2] - drone.flight.startPosition[2]) * startBlend + (liveTarget[2] - drone.flight.targetPosition[2]) * endBlend
+      arcPos[0] + (liveTarget[0] - drone.flight.targetPosition[0]) * endBlend,
+      arcPos[1] + (liveTarget[1] - drone.flight.targetPosition[1]) * endBlend,
+      arcPos[2] + (liveTarget[2] - drone.flight.targetPosition[2]) * endBlend
     ];
   }
 
   if (drone.status === "returning") {
-    // 1. Live moving capture point at start
-    const target = drone.targetId ? debrisList?.find((d) => d.id === drone.targetId) : undefined;
-    const liveCapture = target
-      ? getDebrisOrbitalPosition(target, timeSec)
-      : drone.flight.startPosition;
-    // 2. Live moving smelting standoff at station
     const liveStandOff = getSmeltingStandOffPosition(timeSec);
-
-    const startBlend = (1 - progress) * (1 - progress);
-    const endBlend = progress * progress;
+    const endBlend = progress > 0.82 ? Math.pow((progress - 0.82) / 0.18, 2) : 0;
 
     return [
-      arcPos[0] + (liveCapture[0] - drone.flight.startPosition[0]) * startBlend + (liveStandOff[0] - drone.flight.targetPosition[0]) * endBlend,
-      arcPos[1] + (liveCapture[1] - drone.flight.startPosition[1]) * startBlend + (liveStandOff[1] - drone.flight.targetPosition[1]) * endBlend,
-      arcPos[2] + (liveCapture[2] - drone.flight.startPosition[2]) * startBlend + (liveStandOff[2] - drone.flight.targetPosition[2]) * endBlend
+      arcPos[0] + (liveStandOff[0] - drone.flight.targetPosition[0]) * endBlend,
+      arcPos[1] + (liveStandOff[1] - drone.flight.targetPosition[1]) * endBlend,
+      arcPos[2] + (liveStandOff[2] - drone.flight.targetPosition[2]) * endBlend
     ];
   }
 
@@ -704,7 +769,7 @@ export function getDroneWorldPosition(
   timeSec: number,
   debrisList?: Debris[]
 ): [number, number, number] {
-  if (drone.flight && (drone.status === "intercepting" || drone.status === "returning")) {
+  if (drone.flight) {
     return calculateBlendedDroneFlightPosition(drone, timeSec, debrisList);
   }
   if (drone.status === "capturing" && drone.targetId) {
@@ -723,7 +788,7 @@ export function getDroneWorldPosition(
     }
   }
   if (drone.subStatus === "holding") {
-    return getStationHoldingPosition(0, timeSec);
+    return getStationHoldingPosition(drone.holdingSlot ?? 0, timeSec);
   }
   if (drone.subStatus === "ingesting") {
     return getSmeltingStandOffPosition(timeSec);
@@ -736,6 +801,7 @@ export function getDroneWorldPosition(
   }
   return drone.position;
 }
+
 
 
 

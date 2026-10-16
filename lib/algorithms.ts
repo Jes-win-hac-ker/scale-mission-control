@@ -1,5 +1,16 @@
 import type { Debris, Drone } from "./store";
-import { distance } from "./store";
+import {
+  getBerthWorldPosition,
+  getDebrisOrbitalPosition,
+  getGlobalSimTime
+} from "./orbital";
+
+function distance(a: [number, number, number], b: [number, number, number]): number {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 export interface MaterialAssay {
   titanium: number;       // % Structural aerospace titanium / alloys
@@ -11,49 +22,49 @@ export interface MaterialAssay {
 
 export type SwarmStrategy = "balanced" | "max_yield" | "kessler_defense" | "min_delta_v";
 
-// Derives realistic material spectroscopy assay from material type and seed hash
+// Derives realistic material spectroscopy assay from material type and seed hash (always sums to 100%)
 export function getMaterialAssay(material: string, id: string): MaterialAssay {
   const mat = (material || "").toLowerCase();
   const hash = id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const variance = (hash % 7) - 3; // -3% to +3% variance
 
+  let titanium = 66;
+  let preciousMetals = 12;
+  let semiconductor = 10;
+  let propellant = 4;
+
   if (mat.includes("rocket") || mat.includes("booster") || mat.includes("fairing")) {
-    return {
-      titanium: Math.max(40, Math.min(75, 60 + variance)),
-      preciousMetals: Math.max(2, 6 + Math.floor(variance / 2)),
-      semiconductor: Math.max(3, 8 - variance),
-      propellant: Math.max(8, Math.min(30, 20 + variance * 2)),
-      silicates: 6
-    };
+    titanium = Math.max(40, Math.min(72, 58 + variance));
+    preciousMetals = Math.max(3, 6 + Math.floor(variance / 2));
+    semiconductor = Math.max(3, 8 - variance);
+    propellant = Math.max(8, Math.min(28, 20 + variance));
+  } else if (mat.includes("solar") || mat.includes("battery")) {
+    titanium = Math.max(15, 22 + variance);
+    preciousMetals = Math.max(5, 14 + variance);
+    semiconductor = Math.max(35, Math.min(62, 52 - variance));
+    propellant = 4;
+  } else if (mat.includes("chondrite") || mat.includes("meteorite") || mat.includes("shard")) {
+    titanium = Math.max(12, 18 + variance);
+    preciousMetals = Math.max(10, Math.min(35, 24 + variance * 2));
+    semiconductor = 5;
+    propellant = 5;
+  } else {
+    titanium = Math.max(50, 68 + variance);
+    preciousMetals = Math.max(5, 12 + variance);
+    semiconductor = Math.max(4, 10 - variance);
+    propellant = 3;
   }
 
-  if (mat.includes("solar") || mat.includes("battery")) {
-    return {
-      titanium: Math.max(15, 22 + variance),
-      preciousMetals: Math.max(5, 14 + variance),
-      semiconductor: Math.max(35, Math.min(65, 52 - variance)),
-      propellant: 4,
-      silicates: 8
-    };
-  }
+  const silicates = Math.max(2, 100 - (titanium + preciousMetals + semiconductor + propellant));
+  // Adjust titanium by any clamping residual so sum is strictly 100
+  const residual = 100 - (titanium + preciousMetals + semiconductor + propellant + silicates);
 
-  if (mat.includes("chondrite") || mat.includes("meteorite") || mat.includes("shard")) {
-    return {
-      titanium: Math.max(10, 16 + variance),
-      preciousMetals: Math.max(8, Math.min(35, 24 + variance * 2)),
-      semiconductor: 5,
-      propellant: 5,
-      silicates: Math.max(30, Math.min(65, 50 - variance * 2))
-    };
-  }
-
-  // Default structural component (reaction wheels, titanium shielding)
   return {
-    titanium: Math.max(50, 70 + variance),
-    preciousMetals: Math.max(5, 12 + variance),
-    semiconductor: Math.max(4, 10 - variance),
-    propellant: 2,
-    silicates: 6
+    titanium: titanium + residual,
+    preciousMetals,
+    semiconductor,
+    propellant,
+    silicates
   };
 }
 
@@ -104,7 +115,8 @@ export function solveHungarianMatching(
   drones: Drone[],
   debrisList: Debris[],
   depotPos: [number, number, number],
-  strategy: SwarmStrategy
+  strategy: SwarmStrategy,
+  simTimeSec?: number
 ): { droneId: string; targetId: string; cost: number }[] {
   // Fuel constraint removed: all idle drones are fully operational and unconstrained
   const idleDrones = drones.filter((d) => d.status === "idle");
@@ -114,6 +126,7 @@ export function solveHungarianMatching(
     return [];
   }
 
+  const timeSec = simTimeSec ?? getGlobalSimTime();
   const numDrones = idleDrones.length;
   const numTargets = availableDebris.length;
   const dim = Math.max(numDrones, numTargets);
@@ -123,10 +136,12 @@ export function solveHungarianMatching(
 
   for (let i = 0; i < numDrones; i++) {
     const drone = idleDrones[i];
+    const liveDronePos = getBerthWorldPosition(drone.berthId, timeSec);
     for (let j = 0; j < numTargets; j++) {
       const target = availableDebris[j];
-      const distOut = distance(drone.position, target.position);
-      const distIn = distance(target.position, depotPos);
+      const liveTargetPos = getDebrisOrbitalPosition(target, timeSec);
+      const distOut = distance(liveDronePos, liveTargetPos);
+      const distIn = distance(liveTargetPos, depotPos);
       const fuelCost = calculateFuelBurn(distOut, distIn, target.mass);
 
       const threat = calculateKesslerThreat(target);

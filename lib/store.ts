@@ -56,7 +56,7 @@ export type DroneFlight = {
   startSimTime?: number;
   duration: number; // in seconds
   fuelCost: number;
-  type?: "intercept" | "return" | "docking";
+  type?: "intercept" | "return" | "docking" | "holding" | "ingest_approach";
 };
 
 export interface DepotStockpile {
@@ -76,6 +76,7 @@ export type Debris = {
   status: DebrisStatus;
   subStatus?: "free" | "detumbling" | "clamped" | "towed" | "ingesting" | "smelted";
   assignedDroneId?: string | null;
+  ingestStartSimTime?: number;
   assay: MaterialAssay;
   threatIndex: number;
   deltaVBudget: number;
@@ -91,6 +92,7 @@ export type Drone = {
   payload: number;
   targetId: string | null;
   speed: number;
+  holdingSlot?: number;
   flight?: DroneFlight;
 };
 
@@ -517,6 +519,24 @@ const initialDrones: Drone[] = [
   }
 ];
 
+const activeMissionTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleMissionTimer(fn: () => void, delayMs: number): ReturnType<typeof setTimeout> {
+  const timerId = setTimeout(() => {
+    activeMissionTimers.delete(timerId);
+    fn();
+  }, delayMs);
+  activeMissionTimers.add(timerId);
+  return timerId;
+}
+
+function clearAllMissionTimers(): void {
+  activeMissionTimers.forEach((timerId) => {
+    clearTimeout(timerId);
+  });
+  activeMissionTimers.clear();
+}
+
 type MissionState = {
   debris: Debris[];
   drones: Drone[];
@@ -731,8 +751,9 @@ export const useMissionStore = create<MissionState>((set, get) => ({
           ? {
               ...d,
               status: "intercepting",
-              subStatus: "accelerating",
+              subStatus: "undocking",
               targetId: target.id,
+              holdingSlot: undefined,
               flight: {
                 startPosition: currentDronePos,
                 targetPosition: rendezvousPos,
@@ -747,8 +768,39 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       )
     }));
 
+    // Real-time flight regime subStatus progression (UNDOCK -> ACCEL -> COAST -> BRAKE)
+    scheduleMissionTimer(() => {
+      set((current) => ({
+        drones: current.drones.map((d) =>
+          d.id === droneId && d.status === "intercepting"
+            ? { ...d, subStatus: "accelerating" }
+            : d
+        )
+      }));
+    }, Math.round(interceptDurationMs * 0.12));
+
+    scheduleMissionTimer(() => {
+      set((current) => ({
+        drones: current.drones.map((d) =>
+          d.id === droneId && d.status === "intercepting"
+            ? { ...d, subStatus: "coasting" }
+            : d
+        )
+      }));
+    }, Math.round(interceptDurationMs * 0.38));
+
+    scheduleMissionTimer(() => {
+      set((current) => ({
+        drones: current.drones.map((d) =>
+          d.id === droneId && d.status === "intercepting"
+            ? { ...d, subStatus: "braking" }
+            : d
+        )
+      }));
+    }, Math.round(interceptDurationMs * 0.68));
+
     // Step 2: Animate along curved orbital arc to predictive rendezvous position
-    setTimeout(() => {
+    scheduleMissionTimer(() => {
       // Step 2A: Rendezvous achieved -> Co-orbital spin-matching & active detumble
       get().addLog(`${droneId} RENDEZVOUS // ACTIVE SPIN-MATCHING & DETUMBLE TRACTOR ENGAGED`, "action");
 
@@ -770,7 +822,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       }));
 
       // Step 2B: Mechanical clamping & grapple lock after 1800ms
-      setTimeout(() => {
+      scheduleMissionTimer(() => {
         get().addLog(`${droneId} HARPOON TETHER LOCKED // HYDRAULIC CLAWS CLAMPED ON ${target.id}`, "success");
 
         set((current) => ({
@@ -783,7 +835,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
         }));
 
         // Step 3: Initiate Inbound Tow Return towards Orbiting Station after 1500ms (3.3s total capture)
-        setTimeout(() => {
+        scheduleMissionTimer(() => {
           get().addLog(`${droneId} TOWING ${target.id} // INBOUND DESCENT TO ORBITING DEPOT-01 ISRU REFINERY`, "action");
 
           const returnStartSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
@@ -826,20 +878,29 @@ export const useMissionStore = create<MissionState>((set, get) => ({
           }));
 
           // Step 4: Reaches Station Perimeter -> Check Traffic Control Queue to Prevent Collision
-          setTimeout(() => {
+          scheduleMissionTimer(() => {
             const currentStore = get();
             if (currentStore.isRefineryOccupied) {
               // Traffic Control Queue: Stand-off is currently occupied by another drone!
-              const currentQueue = currentStore.dockingQueue;
-              const queueIndex = currentQueue.length;
-              const queueSlotNum = queueIndex + 1;
+              const usedSlots = new Set(
+                currentStore.drones
+                  .filter((d) => d.subStatus === "holding" && d.holdingSlot !== undefined)
+                  .map((d) => d.holdingSlot!)
+              );
+              let assignedSlot = 0;
+              while (usedSlots.has(assignedSlot) && assignedSlot < 6) {
+                assignedSlot++;
+              }
+              const queueSlotNum = currentStore.dockingQueue.length + 1;
+
               get().addLog(
                 `TRAFFIC CONTROL // ${droneId} INBOUND // REFINERY ACTIVE // ENTERING HOLDING PATTERN [SLOT #${queueSlotNum}]`,
                 "warning"
               );
 
               const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
-              const holdingPos = getStationHoldingPosition(queueIndex, arriveSimTime);
+              const currentStandOffPos = getSmeltingStandOffPosition(arriveSimTime);
+              const holdingPos = getStationHoldingPosition(assignedSlot, arriveSimTime);
 
               set((current) => ({
                 dockingQueue: [...current.dockingQueue, droneId],
@@ -849,8 +910,17 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                         ...d,
                         status: "returning",
                         subStatus: "holding",
+                        holdingSlot: assignedSlot,
                         position: holdingPos,
-                        flight: undefined
+                        flight: {
+                          startPosition: currentStandOffPos,
+                          targetPosition: holdingPos,
+                          startTime: Date.now(),
+                          startSimTime: arriveSimTime,
+                          duration: 1.3,
+                          fuelCost: 0,
+                          type: "holding"
+                        }
                       }
                     : d
                 )
@@ -883,12 +953,22 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
     const arriveSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
     const liveSmeltingStandOff = getSmeltingStandOffPosition(arriveSimTime);
+    const wasHolding = drone.subStatus === "holding";
+    const approachStartPos = wasHolding
+      ? getStationHoldingPosition(drone.holdingSlot ?? 0, arriveSimTime)
+      : liveSmeltingStandOff;
 
     set((current) => ({
       dockingQueue: current.dockingQueue.filter((id) => id !== droneId),
       debris: current.debris.map((item) =>
         item.id === target.id
-          ? { ...item, status: "captured", subStatus: "ingesting", position: liveSmeltingStandOff }
+          ? {
+              ...item,
+              status: "captured",
+              subStatus: "ingesting",
+              ingestStartSimTime: arriveSimTime,
+              position: liveSmeltingStandOff
+            }
           : item
       ),
       drones: current.drones.map((d) =>
@@ -897,16 +977,27 @@ export const useMissionStore = create<MissionState>((set, get) => ({
               ...d,
               status: "recovered",
               subStatus: "ingesting",
+              holdingSlot: undefined,
               position: liveSmeltingStandOff,
               payload: 0,
-              flight: undefined
+              flight: wasHolding
+                ? {
+                    startPosition: approachStartPos,
+                    targetPosition: liveSmeltingStandOff,
+                    startTime: Date.now(),
+                    startSimTime: arriveSimTime,
+                    duration: 0.55,
+                    fuelCost: 0,
+                    type: "ingest_approach"
+                  }
+                : undefined
             }
           : d
       )
     }));
 
     // Step 4B: Ingestion & Smelting Plasma Flash after 1800ms
-    setTimeout(() => {
+    scheduleMissionTimer(() => {
       const formattedVal = formatLogValue(target.value);
       const titaniumKg = Math.round(target.mass * (target.assay.titanium / 100));
       const preciousKg = Math.round(target.mass * (target.assay.preciousMetals / 100));
@@ -926,6 +1017,7 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       const smeltSimTime = getGlobalSimTime() || ((Date.now() - get().missionStartedAt) / 1000);
       const liveIntakePos = getSmeltingIntakePosition(smeltSimTime);
       const liveStandOffPos = getSmeltingStandOffPosition(smeltSimTime);
+      const liveBerthPos = getBerthWorldPosition(drone.berthId, smeltSimTime + 2.4);
 
       set((current) => ({
         totalRecoveredMass: current.totalRecoveredMass + target.mass,
@@ -956,7 +1048,16 @@ export const useMissionStore = create<MissionState>((set, get) => ({
                 subStatus: "docking",
                 position: liveStandOffPos,
                 fuel: 100,
-                targetId: null
+                targetId: null,
+                flight: {
+                  startPosition: liveStandOffPos,
+                  targetPosition: liveBerthPos,
+                  startTime: Date.now(),
+                  startSimTime: smeltSimTime,
+                  duration: 2.4,
+                  fuelCost: 0,
+                  type: "docking"
+                }
               }
             : d
         )
@@ -982,14 +1083,16 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       }
 
       // Step 5: Smooth Berth Approach & Magnetic Mooring after 2400ms
-      setTimeout(() => {
+      scheduleMissionTimer(() => {
         get().addLog(
           `${droneId} MOORED AT BERTH ${drone.berthId} // UMBILICAL POWER & ISRU RECHARGE ACTIVE`,
           "success"
         );
         set((current) => ({
           drones: current.drones.map((d) =>
-            d.id === droneId ? { ...d, status: "idle", subStatus: "docked" } : d
+            d.id === droneId
+              ? { ...d, status: "idle", subStatus: "docked", flight: undefined, holdingSlot: undefined }
+              : d
           )
         }));
       }, 2400);
@@ -1013,14 +1116,15 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       return;
     }
 
-    // Execute Kuhn-Munkres (Hungarian) Bipartite Matching Algorithm with live orbital station position
+    // Execute Kuhn-Munkres (Hungarian) Bipartite Matching Algorithm with live orbital positions
     const simTime = getGlobalSimTime() || ((Date.now() - state.missionStartedAt) / 1000);
     const currentDepotPos = getStationOrbitalPosition(simTime, state.depot);
     const optimalMatches = solveHungarianMatching(
       state.drones,
       state.debris,
       currentDepotPos,
-      state.swarmStrategy
+      state.swarmStrategy,
+      simTime
     );
 
     if (optimalMatches.length === 0) {
@@ -1051,11 +1155,14 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   },
 
   resetSimulation: () => {
+    clearAllMissionTimers();
     set({
       debris: initialDebris,
       drones: initialDrones,
       selectedDebrisId: initialDebris[0].id,
       focusedEntity: { type: "earth" },
+      missionStartedAt: Date.now(),
+      lastSmeltedAt: undefined,
       totalRecoveredMass: 0,
       totalRecoveredValue: 0,
       stockpile: {
@@ -1080,3 +1187,4 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     });
   }
 }));
+
